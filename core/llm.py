@@ -1,16 +1,17 @@
 from abc import ABC, abstractmethod
 from typing import Literal
 
-from langchain_core.language_models import BaseLanguageModel
-from langchain_openai import OpenAI
-from langchain_anthropic import Anthropic
-from langchain_ollama import Ollama
+from langchain_core.language_models import BaseChatModel
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+from langchain_ollama import ChatOllama
 
 from core.config import settings
+
 ModelTier = Literal["cheap", "standard", "frontier"]
 Provider = Literal["openai", "anthropic", "ollama"]
 
-TIER_MODEL_MAP : dict[ProviderName, dict[ModelTier, str]] = {
+TIER_MODEL_MAP: dict[Provider, dict[ModelTier, str]] = {
     "openai": {
         "cheap": settings.tier_cheap_model,
         "standard": settings.tier_standard_model,
@@ -27,28 +28,36 @@ TIER_MODEL_MAP : dict[ProviderName, dict[ModelTier, str]] = {
         "frontier": "qwen2.5:14b",
     },
 }
+
+
 class BaseLLMProvider(ABC):
     @abstractmethod
-    def get_chat_model(self,model: str,temperature: float = 0.0) -> BaseChatModel:
-        pass
+    def get_chat_model(self, model: str, temperature: float = 0.0) -> BaseChatModel: ...
+
+
 class OpenAIProvider(BaseLLMProvider):
     def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatOpenAI:
         return ChatOpenAI(model=model, temperature=temperature, api_key=settings.openai_api_key)
+
 
 class AnthropicProvider(BaseLLMProvider):
     def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatAnthropic:
         return ChatAnthropic(model=model, temperature=temperature, api_key=settings.anthropic_api_key)
 
+
 class OllamaProvider(BaseLLMProvider):
     def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatOllama:
         return ChatOllama(model=model, temperature=temperature, base_url=settings.ollama_base_url)
 
-_PROVIDERS: dict[ProviderName, BaseLLMProvider] = {
+
+_PROVIDERS: dict[Provider, BaseLLMProvider] = {
     "openai": OpenAIProvider(),
     "anthropic": AnthropicProvider(),
     "ollama": OllamaProvider(),
 }
-def create_llm(tier: ModelTier, provider: Provider) -> BaseChatModel:
+
+
+def create_llm(tier: ModelTier, temperature: float = 0.0) -> BaseChatModel:
     provider = _PROVIDERS[settings.llm_provider]
     model_name = TIER_MODEL_MAP[settings.llm_provider][tier]
-    return provider.get_chat_model(model=model_name)
+    return provider.get_chat_model(model=model_name, temperature=temperature)

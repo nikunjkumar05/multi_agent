@@ -1,8 +1,3 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 from core.audit import get_audit_trail
@@ -47,7 +42,7 @@ class CostTierOptimizer:
         self._llm = create_llm("cheap")
         self._structured_llm = self._llm.with_structured_output(OptimizerDecision)
 
-    def optimize(self,task: str,budget: BudgetTracker,task_id: str,) -> OptimizerDecision:
+    def optimize(self, task: str, budget: BudgetTracker, task_id: str) -> OptimizerDecision:
         prompt = OPTIMIZER_PROMPT.format(task=task, spent_pct=budget.spent_pct)
         decision: OptimizerDecision = self._structured_llm.invoke(prompt)
 

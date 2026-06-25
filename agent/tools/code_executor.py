@@ -1,0 +1,54 @@
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from agent.tools.base import BaseTool, ToolResult
+
+class CodeExecutor(BaseTool):
+    def __init__(self):
+        super().__init__(
+            name="code_executor",
+            description="Execute Python code in a sandboxed subprocess. Timeout: 30 seconds.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "The Python code to execute."
+                    }
+                },
+                "required": ["code"]
+            }
+        )
+    
+    def execute(self, **kwargs: Any) -> ToolResult:
+        code = kwargs.get("code", "")
+        if not code:
+            return ToolResult(success=False, output=None, error="No code provided.")
+        
+        try :
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+                f.write(code)
+                tmp_path = f.name
+            
+            result = subprocess.run(
+                ["python", tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            Path(tmp_path).unlink(missing_ok=True)  # Clean up the temporary file
+
+            if result.returncode != 0:
+                return ToolResult(success=False, output=result.stdout, error=result.stderr)
+            
+            return ToolResult(
+                success=True,
+                output=result.stdout,
+                metadata={"returncode": result.returncode},
+            )
+        except subprocess.TimeoutExpired:
+            return ToolResult(success=False, output=None, error="Execution timed out (30s)")
+        except Exception as e:
+            return ToolResult(success=False, output=None, error=str(e))

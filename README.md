@@ -9,24 +9,24 @@ POST /execute {task, budget_usd}
         │
         ▼
 ┌─────────────────────┐
-│  Cost-Tier Optimizer │ ← LLM + rule-based fallback
-│  selects topology    │
+│ Cost-Tier Optimizer │ ← LLM + rule-based fallback
+│  selects topology   │
 └────────┬────────────┘
          ▼
 ┌─────────────────────┐
-│  Agent Team          │
-│  Planner → Executor  │
-│  → Validator         │
+│  Agent Team         │
+│  Planner → Executor │
+│  → Validator        │
+└────────┬────────────┘
+         ▼
+┌─────────────────────┐ 
+│ Escalation Engine   │ ← triggers on reasoning     
+│ → Judge (if needed) │
 └────────┬────────────┘
          ▼
 ┌─────────────────────┐
-│  Escalation Engine ★ │ ← triggers on reasoning divergence
-│  → Judge (if needed) │
-└────────┬────────────┘
-         ▼
-┌─────────────────────┐
-│  Budget Governor ★   │ ← collapses topology at 90% spent
-│  degrades topology   │
+│  Budget Governor    │ ← collapses topology at 90% spent
+│  degrades topology  │
 └────────┬────────────┘
          ▼
    Result + Audit Trail

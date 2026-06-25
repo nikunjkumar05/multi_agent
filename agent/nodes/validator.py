@@ -30,10 +30,11 @@ def validate_result(state: AgentState) -> dict:
     steps = state.get("steps", [])
     step_results = state.get("step_results", {})
 
-    if idx < 0 or idx >= len(steps):
+    last_idx = idx - 1
+    if last_idx < 0 or last_idx >= len(steps):
         return {"validator_confidence": 1.0, "reasoning_diverged": False, "status": "validating"}
 
-    step = steps[idx]
+    step = steps[last_idx]
     result_text = step_results.get(step["step_id"], step.get("result", ""))
 
     tier = state["decision"].model_tiers.get("validator", "cheap")

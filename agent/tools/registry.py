@@ -31,4 +31,4 @@ class ToolRegistry:
     def list_names(self) -> list[str]:
         return list(self._tools.keys())
 
-register = ToolRegistry()
+registry = ToolRegistry()

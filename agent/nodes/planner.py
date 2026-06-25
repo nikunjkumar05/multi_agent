@@ -8,12 +8,16 @@ Return ONLY a JSON array of steps. Each step has:
 - description (string, clear action to perform)
 
 Example:
-[{"step_id": 1, "description": "Research quantum computing basics"}, {"step_id": 2, "description": "Draft summary of key concepts"}]
+[{"step_id": 1, "description": "Write the coin change DP function"}, {"step_id": 2, "description": "Add test cases and verify output"}]
 
 Rules:
-- 2-8 steps maximum
-- Each step must be actionable by a single agent
-- Steps should be sequential and dependent
+- 1-3 steps maximum. Most tasks need only 1-2 steps.
+- For simple tasks (code generation, Q&A, math, writing), use exactly 1 step.
+- For medium tasks (code + tests, research + summary), use 2 steps.
+- Never exceed 3 steps unless the task is explicitly multi-phase.
+- Each step must produce a distinct, non-overlapping piece of work.
+- Never repeat the same action in different steps.
+- Steps should be sequential and dependent — each step builds on the previous.
 """
 
 def plan_task(state: AgentState) -> dict:
@@ -34,6 +38,8 @@ def plan_task(state: AgentState) -> dict:
             cleaned = line.strip().lstrip("0123456789.:-) ")
             if cleaned:
                 steps_raw.append({"step_id": i, "description": cleaned})
+
+    steps_raw = steps_raw[:3]
 
     steps: list[PlanStep] = [
         PlanStep(

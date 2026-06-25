@@ -6,7 +6,10 @@ from core.llm import create_llm
 
 EXECUTOR_SYSTEM = """You are a step executor. Complete the given step using available tools.
 After using a tool, provide the final result as plain text.
-Always produce a result — never return empty output."""
+Always produce a result — never return empty output.
+
+If previous steps have already produced output, build on it — do NOT repeat the same work.
+Only include new/changed content in your result."""
 
 
 def execute_step(state: AgentState) -> dict:
@@ -21,9 +24,23 @@ def execute_step(state: AgentState) -> dict:
     tier = state["decision"].model_tiers.get("executor", "standard")
     llm = create_llm(tier)
 
+    previous_results = state.get("step_results", {})
+    context_block = ""
+    if previous_results:
+        parts = []
+        for sid, res in previous_results.items():
+            preview = str(res)[:500]
+            parts.append(f"Step {sid} result: {preview}")
+        context_block = "\n\nPrevious step results:\n" + "\n".join(parts)
+
     messages = [
         SystemMessage(content=EXECUTOR_SYSTEM),
-        HumanMessage(content=f"Step {step['step_id']}: {step['description']}\n\nTask: {state['task']}\n\nTools available: {registry.list_names()}"),
+        HumanMessage(content=(
+            f"Step {step['step_id']}: {step['description']}\n\n"
+            f"Task: {state['task']}\n"
+            f"Tools available: {registry.list_names()}"
+            f"{context_block}"
+        )),
     ]
 
     result = llm.invoke(messages)

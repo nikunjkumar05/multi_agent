@@ -3,13 +3,13 @@ from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
+from langchain_mistralai import ChatMistralAI
 from langchain_ollama import ChatOllama
 
 from core.config import settings
 
 ModelTier = Literal["cheap", "standard", "frontier"]
-Provider = Literal["openai", "anthropic", "ollama"]
+Provider = Literal["openai", "mistral", "ollama"]
 
 TIER_MODEL_MAP: dict[Provider, dict[ModelTier, str]] = {
     "openai": {
@@ -17,10 +17,10 @@ TIER_MODEL_MAP: dict[Provider, dict[ModelTier, str]] = {
         "standard": settings.tier_standard_model,
         "frontier": settings.tier_frontier_model,
     },
-    "anthropic": {
-        "cheap": "claude-3-5-haiku-latest",
-        "standard": "claude-3-5-sonnet-latest",
-        "frontier": "claude-opus-4-20250514",
+    "mistral": {
+        "cheap": settings.tier_cheap_model,
+        "standard": settings.tier_standard_model,
+        "frontier": settings.tier_frontier_model,
     },
     "ollama": {
         "cheap": "llama3.2:3b",
@@ -40,9 +40,9 @@ class OpenAIProvider(BaseLLMProvider):
         return ChatOpenAI(model=model, temperature=temperature, api_key=settings.openai_api_key)
 
 
-class AnthropicProvider(BaseLLMProvider):
-    def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatAnthropic:
-        return ChatAnthropic(model=model, temperature=temperature, api_key=settings.anthropic_api_key)
+class MistralProvider(BaseLLMProvider):
+    def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatMistralAI:
+        return ChatMistralAI(model=model, temperature=temperature, api_key=settings.mistral_api_key)
 
 
 class OllamaProvider(BaseLLMProvider):
@@ -52,7 +52,7 @@ class OllamaProvider(BaseLLMProvider):
 
 _PROVIDERS: dict[Provider, BaseLLMProvider] = {
     "openai": OpenAIProvider(),
-    "anthropic": AnthropicProvider(),
+    "mistral": MistralProvider(),
     "ollama": OllamaProvider(),
 }
 

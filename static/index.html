@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BAMAS — Multi-Agent Executor</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>BAMAS</h1>
+      <p class="subtitle">Budget-Aware Multi-Agent Task Executor</p>
+    </header>
+
+    <section class="card">
+      <h2>New Task</h2>
+      <form id="taskForm">
+        <label for="task">Task Description</label>
+        <textarea id="task" rows="3" placeholder="e.g. Write a Python function to compute fibonacci numbers" required></textarea>
+
+        <div class="row">
+          <div>
+            <label for="budget">Budget (USD)</label>
+            <input id="budget" type="number" step="0.01" min="0.01" value="0.10" />
+          </div>
+          <div>
+            <label for="topology">Topology (optional)</label>
+            <select id="topology">
+              <option value="">auto</option>
+              <option value="single">single</option>
+              <option value="supervisor">supervisor</option>
+              <option value="pipeline">pipeline</option>
+              <option value="fanout">fanout</option>
+              <option value="ensemble">ensemble</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" id="submitBtn">Run Task</button>
+      </form>
+    </section>
+
+    <section id="resultSection" class="card hidden">
+      <h2>Result</h2>
+      <div class="status-bar">
+        <span id="statusBadge" class="badge">—</span>
+        <span id="topologyUsed" class="muted"></span>
+      </div>
+      <pre id="resultOutput"></pre>
+    </section>
+
+    <section id="auditSection" class="card hidden">
+      <h2>Audit Trail</h2>
+      <div id="auditLog"></div>
+    </section>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -6,24 +6,28 @@ from agent.topologies.builder import compile_graph
 from core.audit import get_audit_trail
 from core.budget import BudgetTracker
 from core.degrader import degrade_topology
-from core.optimizer import CostTierOptimizer
+from core.optimizer import CostTierOptimizer, rule_based_select_topology
 
 
 async def run_task(
     task: str,
     budget: BudgetTracker,
     task_id: str | None = None,
+    topology_override: str | None = None,
 ) -> dict[str, Any]:
     task_id = task_id or str(uuid.uuid4())
 
-    optimizer = CostTierOptimizer()
-    decision = optimizer.optimize(task=task, budget=budget, task_id=task_id)
-
-    degraded_topology = degrade_topology(
-        budget=budget,
-        current_topology=decision.topology,
-        task_id=task_id,
-    )
+    if topology_override:
+        degraded_topology = topology_override
+        decision = CostTierOptimizer()._make_fallback_decision(task, degraded_topology)
+    else:
+        optimizer = CostTierOptimizer()
+        decision = optimizer.optimize(task=task, budget=budget, task_id=task_id)
+        degraded_topology = degrade_topology(
+            budget=budget,
+            current_topology=decision.topology,
+            task_id=task_id,
+        )
 
     graph = compile_graph(degraded_topology)
 

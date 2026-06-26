@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Any, Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
@@ -61,3 +61,19 @@ def create_llm(tier: ModelTier, temperature: float = 0.0) -> BaseChatModel:
     provider = _PROVIDERS[settings.llm_provider]
     model_name = TIER_MODEL_MAP[settings.llm_provider][tier]
     return provider.get_chat_model(model=model_name, temperature=temperature)
+
+
+def estimate_tokens(response: Any) -> int:
+    usage = getattr(response, "usage_metadata", None)
+    if usage and hasattr(usage, "total_tokens"):
+        return usage.total_tokens or 0
+    content = getattr(response, "content", "")
+    if isinstance(content, str):
+        return max(1, len(content) // 4)
+    return 0
+
+
+def estimate_cost(response: Any, tier: ModelTier) -> float:
+    tokens = estimate_tokens(response)
+    cost_per_1k = settings.tier_cost_per_1k_tokens.get(tier, 0.001)
+    return (tokens / 1000.0) * cost_per_1k

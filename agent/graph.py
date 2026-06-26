@@ -47,6 +47,7 @@ async def run_task(
         "final_result": None,
         "judge_output": None,
         "errors": [],
+        "retry_count": 0,
         "logs": [f"Topology: {degraded_topology}", f"Decision: {decision.rationale}"],
         "status": "pending",
     }

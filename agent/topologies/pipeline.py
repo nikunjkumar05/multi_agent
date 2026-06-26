@@ -7,8 +7,16 @@ from agent.nodes.planner import plan_task
 from agent.nodes.validator import validate_result
 from agent.state import AgentState
 
+MAX_RETRIES = 2
+
 
 def _should_continue(state: AgentState) -> str:
+    retry_count = state.get("retry_count", 0)
+    errors = state.get("errors", [])
+
+    if errors and retry_count < MAX_RETRIES:
+        return "retry"
+
     idx = state.get("current_step_index", 0)
     steps = state.get("steps", [])
     if idx >= len(steps):
@@ -30,7 +38,7 @@ def build_pipeline_graph() -> StateGraph:
     builder.add_conditional_edges(
         "validator",
         _should_continue,
-        {"execute": "executor", "end": "judge"},
+        {"retry": "executor", "execute": "executor", "end": "judge"},
     )
     builder.add_edge("judge", "finalizer")
     builder.add_edge("finalizer", END)

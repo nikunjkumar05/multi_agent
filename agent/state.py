@@ -27,3 +27,4 @@ class AgentState(TypedDict, total=False):
     errors: list[str]
     logs: list[str]
     status: Literal["pending", "planning", "executing", "validating", "escalating", "completed", "failed"]
+    retry_count: int

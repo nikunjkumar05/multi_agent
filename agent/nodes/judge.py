@@ -1,7 +1,8 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.state import AgentState
-from core.llm import create_llm
+from core.llm import create_llm, estimate_cost, estimate_tokens
+from core.node_events import emit_event
 
 JUDGE_SYSTEM = """You are a judge agent. You receive a task, executor output, and validator assessment.
 Your job is to produce the BEST possible final result.
@@ -14,7 +15,7 @@ You can:
 Return the BEST final result as plain text. Be concise and accurate."""
 
 
-def ensemble_judge(state: AgentState) -> dict:
+async def ensemble_judge(state: AgentState) -> dict:
     step_results = state.get("step_results", {})
     last_step = state.get("steps", [])
     last_result = ""
@@ -40,7 +41,20 @@ def ensemble_judge(state: AgentState) -> dict:
     ]
 
     response = llm.invoke(messages)
+
+    budget = state.get("budget")
+    if budget:
+        budget.record_usage(
+            tokens=estimate_tokens(response),
+            cost=estimate_cost(response, tier),
+        )
+
     judge_output = response.content if isinstance(response.content, str) else str(response.content)
+
+    task_id = state.get("task_id", "")
+    await emit_event(task_id, "judge_completed", {
+        "result_preview": str(judge_output)[:200],
+    })
 
     return {
         "judge_output": judge_output,

@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     tier_standard_model: str = "mistral-small-latest"
     tier_frontier_model: str = "mistral-large-latest"
 
+    tier_cost_per_1k_tokens: dict[str, float] = {
+        "cheap": 0.0002,
+        "standard": 0.001,
+        "frontier": 0.008,
+    }
+
     budget_max_cost_usd: float = 1.00
     budget_max_tokens: int = 100_000
 

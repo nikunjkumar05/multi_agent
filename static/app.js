@@ -103,6 +103,9 @@ function appendEvent(event) {
     task_failed: "#ef4444",
     connection_closed: "#888",
     connection_error: "#ef4444",
+    tool_call: "#60a5fa",
+    tool_result: "#34d399",
+    judge_completed: "#fbbf24",
   };
 
   const color = typeColors[event.event_type] || "#ccc";

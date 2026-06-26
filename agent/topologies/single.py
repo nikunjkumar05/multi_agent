@@ -8,12 +8,21 @@ from agent.nodes.planner import plan_task
 from agent.nodes.validator import validate_result
 from agent.state import AgentState
 
+MAX_RETRIES = 2
+
 
 async def _route_after_validation(state: AgentState) -> str:
+    retry_count = state.get("retry_count", 0)
+    errors = state.get("errors", [])
+
+    if errors and retry_count < MAX_RETRIES:
+        return "executor"
+
     steps = state.get("steps", [])
     idx = state.get("current_step_index", 0)
     if idx < len(steps):
         return "executor"
+
     escalate = await check_escalation(state)
     if escalate == "judge":
         return "judge"

@@ -14,12 +14,20 @@ SUPERVISOR_SYSTEM = """You are a supervisor managing worker agents.
 Given a list of planned steps, determine which step to assign next.
 Return ONLY the step_id (integer) to execute next, or -1 if all steps are done."""
 
+MAX_RETRIES = 2
+
+
 def supervisor_node(state: AgentState) -> dict:
     steps = state.get("steps", [])
     idx = state.get("current_step_index", 0)
 
     if idx >= len(steps):
         return {"status": "completed"}
+
+    retry_count = state.get("retry_count", 0)
+    errors = state.get("errors", [])
+    if errors and retry_count < MAX_RETRIES:
+        return {"current_step_index": idx, "status": "executing"}
 
     pending = [s for s in steps if s["status"] == "pending"]
     if not pending:
@@ -58,6 +66,7 @@ def _route_after_supervisor(state: AgentState) -> Literal["executor", "end"]:
     if not pending:
         return "end"
     return "executor"
+
 
 def build_supervisor_graph() -> StateGraph:
     builder = StateGraph(AgentState)

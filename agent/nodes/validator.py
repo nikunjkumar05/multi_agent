@@ -3,27 +3,52 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.state import AgentState
-from core.llm import create_llm
+from agent.nodes.executor import detect_task_type
+from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
 
-VALIDATOR_SYSTEM = """You are a result validator. Evaluate whether the executed step result is correct and complete.
-
-Return ONLY a JSON object:
-{
-  "confidence": 0.0-1.0,
-  "reasoning_diverged": true/false,
-  "issues": ["list of issues if any"],
-  "assessment": "brief explanation"
+VALIDATOR_PROMPTS = {
+    "code": (
+        "You are a code reviewer. Evaluate the code for:\n"
+        "- Correctness and logic errors\n"
+        "- Edge cases and error handling\n"
+        "- Code style and readability\n"
+        "- Security concerns\n\n"
+        "Return ONLY a JSON object:\n"
+        '{"confidence": 0.0-1.0, "reasoning_diverged": true/false, '
+        '"issues": ["list of issues if any"], "assessment": "brief explanation"}\n\n'
+        "Confidence: 1.0=perfect, 0.8+=good, 0.5-0.8=needs review, <0.5=likely wrong\n"
+        "reasoning_diverged = true if the approach is fundamentally wrong."
+    ),
+    "math": (
+        "You are a math verifier. Check the mathematical reasoning for:\n"
+        "- Calculation accuracy\n"
+        "- Logical flow of steps\n"
+        "- Correct application of formulas\n"
+        "- Final answer correctness\n\n"
+        "Return ONLY a JSON object:\n"
+        '{"confidence": 0.0-1.0, "reasoning_diverged": true/false, '
+        '"issues": ["list of issues if any"], "assessment": "brief explanation"}'
+    ),
+    "research": (
+        "You are a research quality checker. Evaluate for:\n"
+        "- Accuracy of claims\n"
+        "- Completeness of analysis\n"
+        "- Quality of sources referenced\n"
+        "- Logical coherence\n\n"
+        "Return ONLY a JSON object:\n"
+        '{"confidence": 0.0-1.0, "reasoning_diverged": true/false, '
+        '"issues": ["list of issues if any"], "assessment": "brief explanation"}'
+    ),
+    "general": (
+        "You are a result validator. Evaluate whether the executed step result is correct and complete.\n\n"
+        "Return ONLY a JSON object:\n"
+        '{"confidence": 0.0-1.0, "reasoning_diverged": true/false, '
+        '"issues": ["list of issues if any"], "assessment": "brief explanation"}\n\n'
+        "Confidence: 1.0=perfect, 0.8+=good, 0.5-0.8=needs review, <0.5=likely wrong\n"
+        "reasoning_diverged = true if the approach is fundamentally wrong."
+    ),
 }
-
-Confidence rules:
-- 1.0 = perfect result
-- 0.8+ = good, minor issues
-- 0.5-0.8 = needs review
-- below 0.5 = likely wrong
-
-reasoning_diverged = true if the executor's approach seems fundamentally wrong or uses different reasoning than expected.
-"""
 
 
 async def validate_result(state: AgentState) -> dict:
@@ -38,11 +63,14 @@ async def validate_result(state: AgentState) -> dict:
     step = steps[last_idx]
     result_text = step_results.get(step["step_id"], step.get("result", ""))
 
+    task_type = detect_task_type(state["task"])
+    validator_prompt = VALIDATOR_PROMPTS.get(task_type, VALIDATOR_PROMPTS["general"])
+
     tier = state["decision"].model_tiers.get("validator", "cheap")
     llm = create_llm(tier)
 
     messages = [
-        SystemMessage(content=VALIDATOR_SYSTEM),
+        SystemMessage(content=validator_prompt),
         HumanMessage(content=(
             f"Task: {state['task']}\n"
             f"Step: {step['description']}\n"
@@ -51,6 +79,14 @@ async def validate_result(state: AgentState) -> dict:
     ]
 
     response = llm.invoke(messages)
+
+    budget = state.get("budget")
+    if budget:
+        budget.record_usage(
+            tokens=estimate_tokens(response),
+            cost=estimate_cost(response, tier),
+        )
+
     content = response.content if isinstance(response.content, str) else str(response.content)
 
     try:

@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from agent.state import AgentState
 from agent.tools.registry import registry
 from core.llm import create_llm
+from core.node_events import emit_event
 
 EXECUTOR_SYSTEM = """You are a step executor. Complete the given step using available tools.
 After using a tool, provide the final result as plain text.
@@ -12,7 +13,7 @@ If previous steps have already produced output, build on it — do NOT repeat th
 Only include new/changed content in your result."""
 
 
-def execute_step(state: AgentState) -> dict:
+async def execute_step(state: AgentState) -> dict:
     idx = state.get("current_step_index", 0)
     steps = state.get("steps", [])
     if idx >= len(steps):
@@ -20,6 +21,12 @@ def execute_step(state: AgentState) -> dict:
 
     step = dict(steps[idx])
     step["status"] = "running"
+
+    task_id = state.get("task_id", "")
+    await emit_event(task_id, "step_started", {
+        "step_id": step["step_id"],
+        "description": step["description"],
+    })
 
     tier = state["decision"].model_tiers.get("executor", "standard")
     llm = create_llm(tier)
@@ -54,6 +61,11 @@ def execute_step(state: AgentState) -> dict:
 
     step_results = dict(state.get("step_results", {}))
     step_results[step["step_id"]] = output
+
+    await emit_event(task_id, "step_completed", {
+        "step_id": step["step_id"],
+        "result_preview": str(output)[:200],
+    })
 
     return {
         "steps": updated_steps,

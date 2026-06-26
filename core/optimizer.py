@@ -82,7 +82,8 @@ class CostTierOptimizer:
         self._llm = create_llm("standard")
         self._structured_llm = self._llm.with_structured_output(OptimizerDecision)
 
-    def _make_fallback_decision(self, task: str, topology: str) -> OptimizerDecision:
+    @staticmethod
+    def _make_fallback_decision(task: str, topology: str) -> OptimizerDecision:
         return OptimizerDecision(
             topology=topology,
             model_tiers={"planner": "cheap", "executor": "standard", "validator": "cheap", "judge": "standard"},
@@ -90,18 +91,33 @@ class CostTierOptimizer:
             alternatives_considered=[],
         )
 
-    def optimize(self, task: str, budget: BudgetTracker, task_id: str) -> OptimizerDecision:
-        prompt = OPTIMIZER_PROMPT.format(task=task, spent_pct=budget.spent_pct)
-        try:
-            decision: OptimizerDecision = self._structured_llm.invoke(prompt)
-        except Exception:
-            fallback_topo = rule_based_select_topology(task)
+    async def optimize(self, task: str, budget: BudgetTracker, task_id: str) -> OptimizerDecision:
+        from core.redis_client import get_redis
+        from core.rl_policy import RLPolicy
+
+        redis = await get_redis()
+        rl = RLPolicy(redis)
+        rl_topology = await rl.select_topology(task, budget.get_band().value)
+
+        if rl_topology:
             decision = OptimizerDecision(
-                topology=fallback_topo,
-                model_tiers={"planner": "cheap", "executor": "standard", "validator": "cheap", "judge": "standard"},
-                rationale=f"LLM optimizer failed, using rule-based fallback: {fallback_topo}",
+                topology=rl_topology,
+                model_tiers={"planner": "standard", "executor": "standard", "validator": "cheap", "judge": "standard"},
+                rationale=f"RL policy selected {rl_topology}",
                 alternatives_considered=[],
             )
+        else:
+            prompt = OPTIMIZER_PROMPT.format(task=task, spent_pct=budget.spent_pct)
+            try:
+                decision = self._structured_llm.invoke(prompt)
+            except Exception:
+                fallback_topo = rule_based_select_topology(task)
+                decision = OptimizerDecision(
+                    topology=fallback_topo,
+                    model_tiers={"planner": "cheap", "executor": "standard", "validator": "cheap", "judge": "standard"},
+                    rationale=f"LLM optimizer failed, using rule-based fallback: {fallback_topo}",
+                    alternatives_considered=[],
+                )
 
         if decision.topology not in VALID_TOPOLOGIES:
             decision.topology = rule_based_select_topology(task)

@@ -1,6 +1,8 @@
 from langchain_core.messages import HumanMessage, SystemMessage
+
 from agent.state import AgentState, PlanStep
 from core.llm import create_llm
+from core.node_events import emit_event
 
 PLANNER_SYSTEM = """You are a task planner. Break the given task into clear, numbered steps.
 Return ONLY a JSON array of steps. Each step has:
@@ -20,7 +22,10 @@ Rules:
 - Steps should be sequential and dependent — each step builds on the previous.
 """
 
-def plan_task(state: AgentState) -> dict:
+async def plan_task(state: AgentState) -> dict:
+    task_id = state.get("task_id", "")
+    await emit_event(task_id, "planner_started", {"task": state["task"]})
+
     tier = state["decision"].model_tiers.get("planner", "standard")
     llm = create_llm(tier)
     decision = llm.invoke([
@@ -51,6 +56,8 @@ def plan_task(state: AgentState) -> dict:
         )
         for s in steps_raw
     ]
+
+    await emit_event(task_id, "planner_completed", {"step_count": len(steps)})
 
     return {
         "steps": steps,

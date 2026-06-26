@@ -9,12 +9,12 @@ from agent.nodes.validator import validate_result
 from agent.state import AgentState
 
 
-def _route_after_validation(state: AgentState) -> str:
+async def _route_after_validation(state: AgentState) -> str:
     steps = state.get("steps", [])
     idx = state.get("current_step_index", 0)
     if idx < len(steps):
         return "executor"
-    escalate = check_escalation(state)
+    escalate = await check_escalation(state)
     if escalate == "judge":
         return "judge"
     return "finalizer"

@@ -23,5 +23,6 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     jwt_secret: str = "change-me-in-production"
+    rl_model_key: str = "rl_policy"
 
 settings = Settings()

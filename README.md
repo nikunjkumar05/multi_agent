@@ -1,6 +1,7 @@
 # BAMAS — Budget-Aware Multi-Agent Task Executor
 
 This repository contains the implementation for the AAAI-26 paper "BAMAS: Structuring Budget-Aware Multi-Agent Systems". Yang, L., Luo, J., Liu, X., Lou, Y., & Chen, Z. (2026). BAMAS: Structuring Budget-Aware Multi-Agent Systems.
+
 A budget-aware multi-agent system that accepts plain-English tasks via API, uses a cost-tier optimizer (adapted from [BAMAS](https://arxiv.org/abs/2504.11428)) to select topology and model tiers, then orchestrates four specialized agents with reasoning-divergence escalation and mid-execution topology collapse under budget pressure.
 
 ## Architecture

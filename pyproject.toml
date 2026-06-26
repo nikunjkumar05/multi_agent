@@ -25,3 +25,4 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
 addopts = "--ignore=tests/stress_test.py"
+asyncio_mode = "auto"

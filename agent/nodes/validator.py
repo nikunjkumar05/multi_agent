@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.state import AgentState
 from core.llm import create_llm
+from core.node_events import emit_event
 
 VALIDATOR_SYSTEM = """You are a result validator. Evaluate whether the executed step result is correct and complete.
 
@@ -25,7 +26,7 @@ reasoning_diverged = true if the executor's approach seems fundamentally wrong o
 """
 
 
-def validate_result(state: AgentState) -> dict:
+async def validate_result(state: AgentState) -> dict:
     idx = state.get("current_step_index", 0)
     steps = state.get("steps", [])
     step_results = state.get("step_results", {})
@@ -59,6 +60,12 @@ def validate_result(state: AgentState) -> dict:
     except (json.JSONDecodeError, ValueError, TypeError):
         confidence = 0.5
         diverged = False
+
+    task_id = state.get("task_id", "")
+    await emit_event(task_id, "validation_completed", {
+        "confidence": confidence,
+        "diverged": diverged,
+    })
 
     return {
         "validator_confidence": confidence,

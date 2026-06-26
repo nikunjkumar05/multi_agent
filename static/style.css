@@ -131,3 +131,36 @@ pre {
 }
 
 .hidden { display: none; }
+
+.event-log {
+  max-height: 300px;
+  overflow-y: auto;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.8rem;
+  font-size: 0.8rem;
+}
+
+.event-entry {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid #21262d;
+  line-height: 1.4;
+}
+
+.event-entry:last-child { border-bottom: none; }
+
+.event-entry .event-time {
+  color: #484f58;
+  margin-right: 0.5rem;
+}
+
+.event-entry .event-type {
+  font-weight: 600;
+  margin-right: 0.3rem;
+}
+
+.event-entry .event-data {
+  color: #8b949e;
+  font-size: 0.75rem;
+}

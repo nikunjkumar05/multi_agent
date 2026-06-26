@@ -1,11 +1,15 @@
 const form = document.getElementById("taskForm");
 const resultSection = document.getElementById("resultSection");
 const auditSection = document.getElementById("auditSection");
+const eventLogSection = document.getElementById("eventLogSection");
 const statusBadge = document.getElementById("statusBadge");
 const topologyUsed = document.getElementById("topologyUsed");
 const resultOutput = document.getElementById("resultOutput");
 const auditLog = document.getElementById("auditLog");
+const eventList = document.getElementById("eventList");
 const submitBtn = document.getElementById("submitBtn");
+
+let currentWs = null;
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -20,10 +24,12 @@ form.addEventListener("submit", async (e) => {
   submitBtn.textContent = "Running...";
   resultSection.classList.remove("hidden");
   auditSection.classList.add("hidden");
+  eventLogSection.classList.remove("hidden");
   statusBadge.textContent = "RUNNING";
   statusBadge.className = "badge running";
   topologyUsed.textContent = "";
   resultOutput.textContent = "Executing task...";
+  eventList.innerHTML = "";
 
   const body = { task, budget_usd: budget };
   if (topology) body.topology = topology;
@@ -37,6 +43,7 @@ form.addEventListener("submit", async (e) => {
     const data = await res.json();
     const taskId = data.task_id;
 
+    connectWebSocket(taskId);
     pollTask(taskId);
   } catch (err) {
     statusBadge.textContent = "FAILED";
@@ -46,6 +53,83 @@ form.addEventListener("submit", async (e) => {
     submitBtn.textContent = "Run Task";
   }
 });
+
+function connectWebSocket(taskId) {
+  if (currentWs) {
+    currentWs.close();
+  }
+
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${protocol}//${location.host}/ws/${taskId}`;
+  currentWs = new WebSocket(wsUrl);
+
+  currentWs.onmessage = function (e) {
+    const event = JSON.parse(e.data);
+    appendEvent(event);
+  };
+
+  currentWs.onclose = function () {
+    appendEvent({
+      event_type: "connection_closed",
+      timestamp: new Date().toISOString(),
+      data: {},
+    });
+  };
+
+  currentWs.onerror = function () {
+    appendEvent({
+      event_type: "connection_error",
+      timestamp: new Date().toISOString(),
+      data: {},
+    });
+  };
+}
+
+function appendEvent(event) {
+  const el = document.createElement("div");
+  el.className = "event-entry";
+
+  const time = new Date(event.timestamp).toLocaleTimeString();
+  const typeColors = {
+    topology_selected: "#00d4ff",
+    planner_started: "#a78bfa",
+    planner_completed: "#a78bfa",
+    step_started: "#34d399",
+    step_completed: "#34d399",
+    validation_completed: "#fbbf24",
+    escalation_check: "#f87171",
+    budget_band_crossed: "#fb923c",
+    task_completed: "#22c55e",
+    task_failed: "#ef4444",
+    connection_closed: "#888",
+    connection_error: "#ef4444",
+  };
+
+  const color = typeColors[event.event_type] || "#ccc";
+  const dataStr = Object.keys(event.data || {}).length > 0
+    ? ` — ${JSON.stringify(event.data)}`
+    : "";
+
+  const timeSpan = document.createElement("span");
+  timeSpan.className = "event-time";
+  timeSpan.textContent = time;
+
+  const typeSpan = document.createElement("span");
+  typeSpan.className = "event-type";
+  typeSpan.style.color = color;
+  typeSpan.textContent = event.event_type;
+
+  const dataSpan = document.createElement("span");
+  dataSpan.className = "event-data";
+  dataSpan.textContent = dataStr;
+
+  el.appendChild(timeSpan);
+  el.appendChild(typeSpan);
+  el.appendChild(dataSpan);
+
+  eventList.appendChild(el);
+  eventList.scrollTop = eventList.scrollHeight;
+}
 
 async function pollTask(taskId) {
   const maxAttempts = 60;
@@ -67,6 +151,7 @@ async function pollTask(taskId) {
         loadAudit(taskId);
         submitBtn.disabled = false;
         submitBtn.textContent = "Run Task";
+        if (currentWs) currentWs.close();
         return;
       }
 
@@ -77,6 +162,7 @@ async function pollTask(taskId) {
         resultOutput.textContent = logs[logs.length - 1] || "Unknown error";
         submitBtn.disabled = false;
         submitBtn.textContent = "Run Task";
+        if (currentWs) currentWs.close();
         return;
       }
 
@@ -91,6 +177,7 @@ async function pollTask(taskId) {
   resultOutput.textContent = "Task timed out after 60 seconds";
   submitBtn.disabled = false;
   submitBtn.textContent = "Run Task";
+  if (currentWs) currentWs.close();
 }
 
 async function loadAudit(taskId) {
@@ -105,18 +192,34 @@ async function loadAudit(taskId) {
     }
 
     auditSection.classList.remove("hidden");
-    auditLog.innerHTML = events
-      .map(
-        (ev) => `
-        <div class="audit-entry">
-          <span class="event-type">${ev.event_type}</span>
-          ${ev.topology ? `topology: ${ev.topology}` : ""}
-          ${ev.band ? `band: ${ev.band}` : ""}
-          ${ev.degradation ? `degraded: ${ev.degradation.original} → ${ev.degradation.collapsed_to}` : ""}
-          <span class="timestamp">${ev.timestamp}</span>
-        </div>`
-      )
-      .join("");
+    auditLog.innerHTML = "";
+    events.forEach((ev) => {
+      const entry = document.createElement("div");
+      entry.className = "audit-entry";
+
+      const typeSpan = document.createElement("span");
+      typeSpan.className = "event-type";
+      typeSpan.textContent = ev.event_type;
+      entry.appendChild(typeSpan);
+
+      if (ev.detail?.topology) {
+        const topoSpan = document.createElement("span");
+        topoSpan.textContent = ` topology: ${ev.detail.topology}`;
+        entry.appendChild(topoSpan);
+      }
+      if (ev.detail?.band) {
+        const bandSpan = document.createElement("span");
+        bandSpan.textContent = ` band: ${ev.detail.band}`;
+        entry.appendChild(bandSpan);
+      }
+
+      const tsSpan = document.createElement("span");
+      tsSpan.className = "timestamp";
+      tsSpan.textContent = ev.timestamp;
+      entry.appendChild(tsSpan);
+
+      auditLog.appendChild(entry);
+    });
   } catch {
     auditSection.classList.add("hidden");
   }

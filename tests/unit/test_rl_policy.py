@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from unittest.mock import AsyncMock
 
@@ -123,17 +121,12 @@ class TestColdStart:
 
     @pytest.mark.asyncio
     async def test_returns_topology_above_min_tasks(self):
-        default_arms = {t: {"alpha": 1.0, "beta": 1.0} for t in TOPOLOGIES}
         mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value="10")
 
-        async def fake_get(key):
-            if key == "rl_policy:total_tasks":
-                return "10"
-            if key == "rl_policy:priors":
-                return json.dumps(default_arms)
-            return None
+        default_arm = {"alpha": b"1.0", "beta": b"1.0"}
+        mock_redis.hgetall = AsyncMock(return_value=default_arm)
 
-        mock_redis.get = AsyncMock(side_effect=fake_get)
         policy = RLPolicy(mock_redis)
         result = await policy.select_topology("Write a code function", "healthy")
         assert result in TOPOLOGIES
@@ -142,85 +135,53 @@ class TestColdStart:
 class TestRewardUpdate:
     @pytest.mark.asyncio
     async def test_good_reward_increases_alpha(self):
-        default_arms = {t: {"alpha": 1.0, "beta": 1.0} for t in TOPOLOGIES}
         mock_redis = AsyncMock()
-
-        async def fake_get(key):
-            if key == "rl_policy:priors":
-                return json.dumps(default_arms)
-            return None
-
-        mock_redis.get = AsyncMock(side_effect=fake_get)
+        mock_redis.hincrbyfloat = AsyncMock()
+        mock_redis.incr = AsyncMock()
         policy = RLPolicy(mock_redis)
 
         await policy.reward("pipeline", quality=1.0, cost_efficiency=1.0)
 
-        assert policy.arms["pipeline"]["alpha"] > 1.0
-        assert policy.arms["pipeline"]["beta"] == 1.0
+        mock_redis.hincrbyfloat.assert_called_once_with(
+            "rl_policy:arm:pipeline", "alpha", 1.0
+        )
 
     @pytest.mark.asyncio
     async def test_bad_reward_increases_beta(self):
-        default_arms = {t: {"alpha": 1.0, "beta": 1.0} for t in TOPOLOGIES}
         mock_redis = AsyncMock()
-
-        async def fake_get(key):
-            if key == "rl_policy:priors":
-                return json.dumps(default_arms)
-            return None
-
-        mock_redis.get = AsyncMock(side_effect=fake_get)
+        mock_redis.hincrbyfloat = AsyncMock()
+        mock_redis.incr = AsyncMock()
         policy = RLPolicy(mock_redis)
 
         await policy.reward("pipeline", quality=0.0, cost_efficiency=0.0)
 
-        assert policy.arms["pipeline"]["alpha"] == 1.0
-        assert policy.arms["pipeline"]["beta"] > 1.0
-
-    @pytest.mark.asyncio
-    async def test_saves_to_redis(self):
-        default_arms = {t: {"alpha": 1.0, "beta": 1.0} for t in TOPOLOGIES}
-        mock_redis = AsyncMock()
-
-        async def fake_get(key):
-            if key == "rl_policy:priors":
-                return json.dumps(default_arms)
-            return None
-
-        mock_redis.get = AsyncMock(side_effect=fake_get)
-        policy = RLPolicy(mock_redis)
-
-        await policy.reward("pipeline", quality=0.8, cost_efficiency=0.9)
-
-        mock_redis.set.assert_called_once()
-        call_args = mock_redis.set.call_args
-        assert call_args[0][0] == "rl_policy:priors"
+        mock_redis.hincrbyfloat.assert_called_once_with(
+            "rl_policy:arm:pipeline", "beta", 1.0
+        )
 
     @pytest.mark.asyncio
     async def test_increments_task_count(self):
-        default_arms = {t: {"alpha": 1.0, "beta": 1.0} for t in TOPOLOGIES}
         mock_redis = AsyncMock()
-
-        async def fake_get(key):
-            if key == "rl_policy:priors":
-                return json.dumps(default_arms)
-            return None
-
-        mock_redis.get = AsyncMock(side_effect=fake_get)
+        mock_redis.hincrbyfloat = AsyncMock()
+        mock_redis.incr = AsyncMock()
         policy = RLPolicy(mock_redis)
 
         await policy.reward("pipeline", quality=0.5, cost_efficiency=0.5)
 
-        mock_redis.incr.assert_called_with("rl_policy:total_tasks")
+        mock_redis.incr.assert_called_once_with("rl_policy:total_tasks")
 
 
 class TestLoadSave:
     @pytest.mark.asyncio
     async def test_load_from_redis(self):
         mock_redis = AsyncMock()
-        priors = {"single": {"alpha": 5.0, "beta": 2.0}, "pipeline": {"alpha": 3.0, "beta": 1.0},
-                  "supervisor": {"alpha": 1.0, "beta": 1.0}, "fanout": {"alpha": 1.0, "beta": 1.0},
-                  "ensemble": {"alpha": 1.0, "beta": 1.0}}
-        mock_redis.get = AsyncMock(return_value=json.dumps(priors))
+        mock_redis.hgetall = AsyncMock(side_effect=lambda key: {
+            "rl_policy:arm:single": {"alpha": b"5.0", "beta": b"2.0"},
+            "rl_policy:arm:pipeline": {"alpha": b"3.0", "beta": b"1.0"},
+            "rl_policy:arm:supervisor": {"alpha": b"1.0", "beta": b"1.0"},
+            "rl_policy:arm:fanout": {"alpha": b"1.0", "beta": b"1.0"},
+            "rl_policy:arm:ensemble": {"alpha": b"1.0", "beta": b"1.0"},
+        }.get(key, {}))
         policy = RLPolicy(mock_redis)
 
         await policy.load()
@@ -231,24 +192,10 @@ class TestLoadSave:
     @pytest.mark.asyncio
     async def test_load_defaults_when_empty(self):
         mock_redis = AsyncMock()
-        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.hgetall = AsyncMock(return_value={})
         policy = RLPolicy(mock_redis)
 
         await policy.load()
 
         for topo in TOPOLOGIES:
             assert policy.arms[topo] == {"alpha": 1.0, "beta": 1.0}
-
-    @pytest.mark.asyncio
-    async def test_save_to_redis(self):
-        mock_redis = AsyncMock()
-        policy = RLPolicy(mock_redis)
-        policy.arms = {t: {"alpha": 1.0, "beta": 1.0} for t in TOPOLOGIES}
-
-        await policy.save()
-
-        mock_redis.set.assert_called_once()
-        saved_json = mock_redis.set.call_args[0][1]
-        saved = json.loads(saved_json)
-        assert "single" in saved
-        assert "pipeline" in saved

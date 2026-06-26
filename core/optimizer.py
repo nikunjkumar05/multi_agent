@@ -109,7 +109,7 @@ class CostTierOptimizer:
         else:
             prompt = OPTIMIZER_PROMPT.format(task=task, spent_pct=budget.spent_pct)
             try:
-                decision = self._structured_llm.invoke(prompt)
+                decision = await self._structured_llm.ainvoke(prompt)
             except Exception:
                 fallback_topo = rule_based_select_topology(task)
                 decision = OptimizerDecision(

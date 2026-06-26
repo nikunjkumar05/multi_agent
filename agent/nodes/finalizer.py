@@ -23,7 +23,7 @@ def finalize_result(state: AgentState) -> dict:
         combined = results_list[0]
     else:
         best = max(results_list, key=len)
-        others = [r for r in results_list if r is not best]
+        others = [r for r in results_list if r != best]
         unique_others = [r for r in others if not _is_subset(r, best)]
 
         if not unique_others:

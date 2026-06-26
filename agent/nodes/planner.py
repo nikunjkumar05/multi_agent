@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -56,6 +57,14 @@ def analyze_task_complexity(task: str) -> int:
     return 1
 
 
+def _strip_code_fences(text: str) -> str:
+    """Strip markdown code block fences (```json ... ``` or ``` ... ```)."""
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+    return text.strip()
+
+
 PLANNER_SYSTEM = """You are a task planner. Break the given task into clear, numbered steps.
 Return ONLY a JSON array of steps. Each step has:
 - step_id (int, starting at 1)
@@ -78,7 +87,7 @@ async def plan_task(state: AgentState) -> dict:
 
     tier = state["decision"].model_tiers.get("planner", "standard")
     llm = create_llm(tier)
-    response = llm.invoke([
+    response = await llm.ainvoke([
         SystemMessage(content=PLANNER_SYSTEM),
         HumanMessage(content=(
             f"Task: {state['task']}\n\n"
@@ -94,13 +103,14 @@ async def plan_task(state: AgentState) -> dict:
         )
 
     content = response.content if isinstance(response.content, str) else str(response.content)
+    cleaned_content = _strip_code_fences(content)
     try:
-        steps_raw = json.loads(content)
+        steps_raw = json.loads(cleaned_content)
     except json.JSONDecodeError:
-        lines = content.strip().split("\n")
+        lines = cleaned_content.strip().split("\n")
         steps_raw = []
         for i, line in enumerate(lines, 1):
-            cleaned = line.strip().lstrip("0123456789.:-) ")
+            cleaned = re.sub(r"^\d+[\.\)\:\-]\s*", "", line.strip())
             if cleaned:
                 steps_raw.append({"step_id": i, "description": cleaned})
 

@@ -171,7 +171,7 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
     tool_messages: list = []
 
     for _iteration in range(MAX_TOOL_ITERATIONS):
-        response = llm.invoke(messages + tool_messages)
+        response = await llm.ainvoke(messages + tool_messages)
 
         if budget:
             budget.record_usage(

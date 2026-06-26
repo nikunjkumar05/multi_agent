@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks
@@ -6,23 +7,33 @@ from agent.graph import run_task
 from api.models.schemas import ExecuteRequest, TaskStatusResponse
 from core.budget import BudgetTracker
 
+log = logging.getLogger(__name__)
+
 router = APIRouter()
 
 _tasks: dict[str, TaskStatusResponse] = {}
 
 
 async def _run_background(task_id: str, task: str, budget: BudgetTracker, topology: str | None = None) -> None:
+    _tasks[task_id] = TaskStatusResponse(
+        task_id=task_id,
+        status="running",
+        budget_spent_pct=0.0,
+        topology=topology or "pending",
+        logs=["Task started"],
+    )
     try:
         result = await run_task(task=task, budget=budget, task_id=task_id, topology_override=topology)
         _tasks[task_id] = TaskStatusResponse(**result)
     except Exception as e:
+        log.exception("BG task %s FAILED", task_id)
         _tasks[task_id] = TaskStatusResponse(
             task_id=task_id,
             status="failed",
             final_result=None,
             budget_spent_pct=budget.spent_pct,
             topology="unknown",
-            logs=[f"Error: {str(e)}"],
+            logs=["Task execution failed — check server logs for details"],
         )
 
 

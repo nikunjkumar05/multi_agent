@@ -78,7 +78,7 @@ async def validate_result(state: AgentState) -> dict:
         )),
     ]
 
-    response = llm.invoke(messages)
+    response = await llm.ainvoke(messages)
 
     budget = state.get("budget")
     if budget:

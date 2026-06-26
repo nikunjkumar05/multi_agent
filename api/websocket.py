@@ -15,9 +15,12 @@ async def websocket_endpoint(ws: WebSocket, task_id: str) -> None:
 
     broadcaster = EventBroadcaster(redis)
 
-    history = await broadcaster.get_history(task_id)
-    for event in history:
-        await ws.send_json(event)
+    try:
+        history = await broadcaster.get_history(task_id)
+        for event in history:
+            await ws.send_json(event)
+    except WebSocketDisconnect:
+        return
 
     try:
         async for event in broadcaster.subscribe(task_id):

@@ -1,4 +1,3 @@
-import json
 import random
 
 import redis.asyncio as aioredis
@@ -28,14 +27,17 @@ class RLPolicy:
         self.arms: dict[str, dict[str, float]] = {}
 
     async def load(self) -> None:
-        raw = await self.redis.get("rl_policy:priors")
-        if raw:
-            self.arms = json.loads(raw)
-        else:
-            self.arms = {t: {"alpha": 1.0, "beta": 1.0} for t in TOPOLOGIES}
-
-    async def save(self) -> None:
-        await self.redis.set("rl_policy:priors", json.dumps(self.arms))
+        self.arms = {}
+        for topo in TOPOLOGIES:
+            arm_key = f"rl_policy:arm:{topo}"
+            raw = await self.redis.hgetall(arm_key)
+            if raw:
+                self.arms[topo] = {
+                    "alpha": float(raw.get(b"alpha", raw.get("alpha", 1.0))),
+                    "beta": float(raw.get(b"beta", raw.get("beta", 1.0))),
+                }
+            else:
+                self.arms[topo] = {"alpha": 1.0, "beta": 1.0}
 
     async def _get_total_tasks(self) -> int:
         val = await self.redis.get("rl_policy:total_tasks")
@@ -81,14 +83,12 @@ class RLPolicy:
         return self._thompson_sample(weights)
 
     async def reward(self, topology: str, quality: float, cost_efficiency: float) -> None:
-        await self.load()
-
         combined = quality * 0.7 + cost_efficiency * 0.3
 
+        arm_key = f"rl_policy:arm:{topology}"
         if combined > 0.5:
-            self.arms[topology]["alpha"] += combined
+            await self.redis.hincrbyfloat(arm_key, "alpha", combined)
         else:
-            self.arms[topology]["beta"] += (1.0 - combined)
+            await self.redis.hincrbyfloat(arm_key, "beta", 1.0 - combined)
 
-        await self.save()
-        await self._increment_tasks()
+        await self.redis.incr("rl_policy:total_tasks")

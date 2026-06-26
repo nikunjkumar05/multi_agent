@@ -54,7 +54,7 @@ def _make_worker_node(worker_name: str):
                     f"Step {step['step_id']}: {step['description']}"
                 )),
             ]
-            response = llm.invoke(messages)
+            response = await llm.ainvoke(messages)
 
             budget = state.get("budget")
             if budget:

@@ -17,7 +17,7 @@ Return ONLY the step_id (integer) to execute next, or -1 if all steps are done."
 MAX_RETRIES = 2
 
 
-def supervisor_node(state: AgentState) -> dict:
+async def supervisor_node(state: AgentState) -> dict:
     steps = state.get("steps", [])
     idx = state.get("current_step_index", 0)
 
@@ -46,7 +46,7 @@ def supervisor_node(state: AgentState) -> dict:
         HumanMessage(content=f"Steps:\n{step_descriptions}\n\nCurrent index: {idx}\nWhich step_id to assign next?"),
     ]
 
-    response = llm.invoke(messages)
+    response = await llm.ainvoke(messages)
     content = response.content.strip() if isinstance(response.content, str) else str(response.content).strip()
     try:
         next_id = int(content)
@@ -56,7 +56,11 @@ def supervisor_node(state: AgentState) -> dict:
     if next_id == -1 or not pending:
         return {"status": "completed"}
 
-    target_idx = next((i for i, s in enumerate(steps) if s["step_id"] == next_id), idx)
+    match = next((i for i, s in enumerate(steps) if s["step_id"] == next_id), None)
+    if match is None or steps[match]["status"] != "pending":
+        target_idx = next((i for i, s in enumerate(steps) if s["status"] == "pending"), idx)
+    else:
+        target_idx = match
     return {"current_step_index": target_idx, "status": "executing"}
 
 

@@ -1,4 +1,4 @@
-# BAMAS — Budget-Aware Multi-Agent Task Executor
+# BAMASE — Budget-Aware Multi-Agent Task Executor
 
 This repository contains the implementation for the AAAI-26 paper "BAMAS: Structuring Budget-Aware Multi-Agent Systems". Yang, L., Luo, J., Liu, X., Lou, Y., & Chen, Z. (2026). BAMAS: Structuring Budget-Aware Multi-Agent Systems.
 

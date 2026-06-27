@@ -17,11 +17,23 @@ Return the BEST final result as plain text. Be concise and accurate."""
 
 async def ensemble_judge(state: AgentState) -> dict:
     step_results = state.get("step_results", {})
-    last_step = state.get("steps", [])
-    last_result = ""
-    if last_step:
-        last_step_id = last_step[-1]["step_id"]
-        last_result = step_results.get(last_step_id, "")
+
+    # Extract parallel agent outputs (e.g. agent_a, agent_b, agent_c) if they exist
+    agent_outputs = []
+    for k, v in step_results.items():
+        if isinstance(k, str) and k.startswith("agent_"):
+            agent_name = k.replace("agent_", "Agent ").upper()
+            agent_outputs.append(f"{agent_name} output:\n{v}")
+
+    if agent_outputs:
+        executor_outputs_str = "\n\n".join(agent_outputs)
+    else:
+        last_step = state.get("steps", [])
+        last_result = ""
+        if last_step:
+            last_step_id = last_step[-1]["step_id"]
+            last_result = step_results.get(last_step_id, "")
+        executor_outputs_str = f"Executor output:\n{last_result}"
 
     validator_conf = state.get("validator_confidence", 1.0)
     diverged = state.get("reasoning_diverged", False)
@@ -33,7 +45,7 @@ async def ensemble_judge(state: AgentState) -> dict:
         SystemMessage(content=JUDGE_SYSTEM),
         HumanMessage(content=(
             f"Task: {state['task']}\n\n"
-            f"Executor output:\n{last_result}\n\n"
+            f"{executor_outputs_str}\n\n"
             f"Validator confidence: {validator_conf:.2f}\n"
             f"Reasoning diverged: {diverged}\n\n"
             f"Produce the best final result."
@@ -60,5 +72,5 @@ async def ensemble_judge(state: AgentState) -> dict:
         "judge_output": judge_output,
         "final_result": judge_output,
         "status": "completed",
-        "logs": state.get("logs", []) + ["Judge produced final result"],
+        "logs": ["Judge produced final result"],
     }

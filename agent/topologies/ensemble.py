@@ -21,9 +21,18 @@ def _agent_variant(system_prompt: str):
 
         response = await llm.ainvoke(messages)
         output = response.content if isinstance(response.content, str) else str(response.content)
+
+        agent_name = "Agent A"
+        if "Agent B" in system_prompt:
+            agent_name = "Agent B"
+        elif "Agent C" in system_prompt:
+            agent_name = "Agent C"
+
+        agent_key = agent_name.lower().replace(" ", "_")
+
         return {
-            "step_results": {**state.get("step_results", {}), f"agent_{system_prompt[:1].lower()}": output},
-            "logs": state.get("logs", []) + [f"Agent {system_prompt[:20]}... completed"],
+            "step_results": {agent_key: output},
+            "logs": [f"{agent_name} completed"],
         }
     return agent_node
 

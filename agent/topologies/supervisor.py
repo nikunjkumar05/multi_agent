@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from agent.nodes.executor import execute_step
+from agent.nodes.finalizer import finalize_result
 from agent.nodes.judge import ensemble_judge
 from agent.nodes.planner import plan_task
 from agent.nodes.validator import validate_result
@@ -64,11 +65,11 @@ async def supervisor_node(state: AgentState) -> dict:
     return {"current_step_index": target_idx, "status": "executing"}
 
 
-def _route_after_supervisor(state: AgentState) -> Literal["executor", "end"]:
+def _route_after_supervisor(state: AgentState) -> Literal["executor", "judge"]:
     steps = state.get("steps", [])
     pending = [s for s in steps if s["status"] == "pending"]
     if not pending:
-        return "end"
+        return "judge"
     return "executor"
 
 
@@ -79,15 +80,18 @@ def build_supervisor_graph() -> StateGraph:
     builder.add_node("executor", execute_step)
     builder.add_node("validator", validate_result)
     builder.add_node("judge", ensemble_judge)
+    builder.add_node("finalizer", finalize_result)
 
     builder.add_edge(START, "planner")
     builder.add_edge("planner", "supervisor")
     builder.add_conditional_edges(
         "supervisor",
         _route_after_supervisor,
-        {"executor": "executor", "end": END},
+        {"executor": "executor", "judge": "judge"},
     )
     builder.add_edge("executor", "validator")
     builder.add_edge("validator", "supervisor")
+    builder.add_edge("judge", "finalizer")
+    builder.add_edge("finalizer", END)
 
     return builder

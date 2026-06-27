@@ -95,29 +95,25 @@ class CostTierOptimizer:
         from core.redis_client import get_redis
         from core.rl_policy import RLPolicy
 
+        rule_topo = rule_based_select_topology(task)
+
         redis = await get_redis()
         rl = RLPolicy(redis)
         rl_topology = await rl.select_topology(task, budget.get_band().value)
 
-        if rl_topology:
-            decision = OptimizerDecision(
-                topology=rl_topology,
-                model_tiers={"planner": "standard", "executor": "standard", "validator": "cheap", "judge": "standard"},
-                rationale=f"RL policy selected {rl_topology}",
-                alternatives_considered=[],
-            )
+        if rl_topology and rule_topo == "single":
+            chosen = rl_topology
+            rationale = f"RL policy selected {rl_topology}"
         else:
-            prompt = OPTIMIZER_PROMPT.format(task=task, spent_pct=budget.spent_pct)
-            try:
-                decision = await self._structured_llm.ainvoke(prompt)
-            except Exception:
-                fallback_topo = rule_based_select_topology(task)
-                decision = OptimizerDecision(
-                    topology=fallback_topo,
-                    model_tiers={"planner": "cheap", "executor": "standard", "validator": "cheap", "judge": "standard"},
-                    rationale=f"LLM optimizer failed, using rule-based fallback: {fallback_topo}",
-                    alternatives_considered=[],
-                )
+            chosen = rule_topo
+            rationale = f"Rule-based: {rule_topo}"
+
+        decision = OptimizerDecision(
+            topology=chosen,
+            model_tiers={"planner": "standard", "executor": "standard", "validator": "cheap", "judge": "standard"},
+            rationale=rationale,
+            alternatives_considered=[],
+        )
 
         if decision.topology not in VALID_TOPOLOGIES:
             decision.topology = rule_based_select_topology(task)

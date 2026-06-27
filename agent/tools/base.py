@@ -43,8 +43,23 @@ class BaseTool(ABC):
                 return str(result.output) if result.output is not None else "Done"
             return f"Error: {result.error}"
 
+        # Dynamically create args_schema Pydantic model from parameters dict
+        from pydantic import Field, create_model
+        fields = {}
+        properties = self.parameters.get("properties", {})
+        required = self.parameters.get("required", [])
+        for name, prop in properties.items():
+            desc = prop.get("description", "")
+            if name in required:
+                fields[name] = (str, Field(..., description=desc))
+            else:
+                fields[name] = (str | None, Field(prop.get("default", None), description=desc))
+
+        args_schema = create_model(f"{self.name}_args_schema", **fields)
+
         return StructuredTool(
             name=self.name,
             description=self.description,
             func=_run,
+            args_schema=args_schema,
         )

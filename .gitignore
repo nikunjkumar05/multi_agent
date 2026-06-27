@@ -13,3 +13,4 @@ venv/
 .ruff_cache/
 .DS_Store
 .opencode
+rl_policy.json

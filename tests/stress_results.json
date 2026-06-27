@@ -1,0 +1,87 @@
+{
+  "topology_sweep": [
+    {
+      "topology": "single",
+      "status": "completed",
+      "steps": 1,
+      "topology_used": "single"
+    },
+    {
+      "topology": "pipeline",
+      "status": "completed",
+      "steps": 1,
+      "topology_used": "pipeline"
+    },
+    {
+      "topology": "supervisor",
+      "status": "completed",
+      "steps": 1,
+      "topology_used": "supervisor"
+    }
+  ],
+  "budget_sweep": [
+    {
+      "budget": 0.05,
+      "status": "completed",
+      "spent_pct": 0.672
+    },
+    {
+      "budget": 0.1,
+      "status": "completed",
+      "spent_pct": 0.336
+    },
+    {
+      "budget": 0.5,
+      "status": "completed",
+      "spent_pct": 0.30436
+    }
+  ],
+  "task_complexity": [
+    {
+      "task": "simple",
+      "status": "completed",
+      "topology": "single",
+      "steps": 1
+    },
+    {
+      "task": "code",
+      "status": "completed",
+      "topology": "pipeline",
+      "steps": 1
+    },
+    {
+      "task": "research",
+      "status": "completed",
+      "topology": "supervisor",
+      "steps": 2
+    },
+    {
+      "task": "complex",
+      "status": "completed",
+      "topology": "pipeline",
+      "steps": 2
+    }
+  ],
+  "concurrent": [
+    {
+      "task": "simple",
+      "status": "completed",
+      "topology": "fanout"
+    },
+    {
+      "task": "code",
+      "status": "completed",
+      "topology": "pipeline"
+    },
+    {
+      "task": "research",
+      "status": "completed",
+      "topology": "supervisor"
+    },
+    {
+      "task": "complex",
+      "status": "completed",
+      "topology": "pipeline"
+    }
+  ]
+}

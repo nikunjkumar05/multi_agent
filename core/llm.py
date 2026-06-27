@@ -37,17 +37,17 @@ class BaseLLMProvider(ABC):
 
 class OpenAIProvider(BaseLLMProvider):
     def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatOpenAI:
-        return ChatOpenAI(model=model, temperature=temperature, api_key=settings.openai_api_key)
+        return ChatOpenAI(model=model, temperature=temperature, api_key=settings.openai_api_key, timeout=settings.llm_request_timeout)
 
 
 class MistralProvider(BaseLLMProvider):
     def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatMistralAI:
-        return ChatMistralAI(model=model, temperature=temperature, api_key=settings.mistral_api_key)
+        return ChatMistralAI(model=model, temperature=temperature, api_key=settings.mistral_api_key, timeout=settings.llm_request_timeout)
 
 
 class OllamaProvider(BaseLLMProvider):
     def get_chat_model(self, model: str, temperature: float = 0.0) -> ChatOllama:
-        return ChatOllama(model=model, temperature=temperature, base_url=settings.ollama_base_url)
+        return ChatOllama(model=model, temperature=temperature, base_url=settings.ollama_base_url, timeout=settings.llm_request_timeout)
 
 
 _PROVIDERS: dict[Provider, BaseLLMProvider] = {
@@ -65,8 +65,13 @@ def create_llm(tier: ModelTier, temperature: float = 0.0) -> BaseChatModel:
 
 def estimate_tokens(response: Any) -> int:
     usage = getattr(response, "usage_metadata", None)
-    if usage and hasattr(usage, "total_tokens"):
-        return usage.total_tokens or 0
+    if usage:
+        if isinstance(usage, dict):
+            total = usage.get("total_tokens")
+            if total is not None:
+                return int(total)
+        elif hasattr(usage, "total_tokens"):
+            return usage.total_tokens or 0
     content = getattr(response, "content", "")
     if isinstance(content, str):
         return max(1, len(content) // 4)

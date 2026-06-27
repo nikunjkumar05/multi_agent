@@ -6,21 +6,26 @@ from typing import Any
 from agent.tools.base import BaseTool, ToolResult
 
 class CodeExecutor(BaseTool):
-    def __init__(self):
-        super().__init__(
-            name="code_executor",
-            description="Execute Python code in a sandboxed subprocess. Timeout: 30 seconds.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "The Python code to execute."
-                    }
-                },
-                "required": ["code"]
-            }
-        )
+    @property
+    def name(self) -> str:
+        return "code_executor"
+
+    @property
+    def description(self) -> str:
+        return "Execute Python code in a sandboxed subprocess. Timeout: 30 seconds."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "The Python code to execute."
+                }
+            },
+            "required": ["code"]
+        }
     
     def execute(self, **kwargs: Any) -> ToolResult:
         code = kwargs.get("code", "")

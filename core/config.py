@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     budget_max_cost_usd: float = 1.00
     budget_max_tokens: int = 100_000
+    llm_request_timeout: int = 30
 
     redis_url: str = "redis://localhost:6379/0"
 

@@ -15,8 +15,11 @@ async def _route_after_validation(state: AgentState) -> str:
     retry_count = state.get("retry_count", 0)
     errors = state.get("errors", [])
 
-    if errors and retry_count < MAX_RETRIES:
-        return "executor"
+    if errors:
+        if retry_count < MAX_RETRIES:
+            return "executor"
+        else:
+            return "finalizer"
 
     steps = state.get("steps", [])
     idx = state.get("current_step_index", 0)

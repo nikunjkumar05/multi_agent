@@ -107,7 +107,7 @@ async def validate_result(state: AgentState) -> dict:
         "validator_confidence": confidence,
         "reasoning_diverged": diverged,
         "status": "validating",
-        "logs": state.get("logs", []) + [
+        "logs": [
             f"Validation: confidence={confidence:.2f}, diverged={diverged}"
         ],
     }

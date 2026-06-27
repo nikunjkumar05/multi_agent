@@ -28,7 +28,7 @@ form.addEventListener("submit", async (e) => {
   statusBadge.textContent = "RUNNING";
   statusBadge.className = "badge running";
   topologyUsed.textContent = "";
-  resultOutput.textContent = "Executing task...";
+  resultOutput.innerHTML = "Executing task...";
   eventList.innerHTML = "";
 
   const body = { task, budget_usd: budget };
@@ -135,7 +135,7 @@ function appendEvent(event) {
 }
 
 async function pollTask(taskId) {
-  const maxAttempts = 60;
+  const maxAttempts = 180;
   for (let i = 0; i < maxAttempts; i++) {
     await sleep(1000);
 
@@ -150,7 +150,8 @@ async function pollTask(taskId) {
       if (task.status === "completed") {
         statusBadge.textContent = "COMPLETE";
         statusBadge.className = "badge complete";
-        resultOutput.textContent = task.final_result || "No result produced";
+        const raw = task.final_result || "No result produced";
+        resultOutput.innerHTML = DOMPurify.sanitize(marked.parse(raw));
         loadAudit(taskId);
         submitBtn.disabled = false;
         submitBtn.textContent = "Run Task";
@@ -177,7 +178,7 @@ async function pollTask(taskId) {
 
   statusBadge.textContent = "TIMEOUT";
   statusBadge.className = "badge failed";
-  resultOutput.textContent = "Task timed out after 60 seconds";
+  resultOutput.textContent = "Task timed out after 3 minutes";
   submitBtn.disabled = false;
   submitBtn.textContent = "Run Task";
   if (currentWs) currentWs.close();

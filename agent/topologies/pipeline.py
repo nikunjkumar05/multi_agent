@@ -14,8 +14,11 @@ def _should_continue(state: AgentState) -> str:
     retry_count = state.get("retry_count", 0)
     errors = state.get("errors", [])
 
-    if errors and retry_count < MAX_RETRIES:
-        return "retry"
+    if errors:
+        if retry_count < MAX_RETRIES:
+            return "retry"
+        else:
+            return "end"
 
     idx = state.get("current_step_index", 0)
     steps = state.get("steps", [])

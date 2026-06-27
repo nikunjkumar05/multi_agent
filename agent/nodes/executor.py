@@ -148,7 +148,7 @@ async def execute_step(state: AgentState) -> dict:
             "status": "executing",
             "retry_count": 0,
             "errors": [],
-            "logs": state.get("logs", []) + [f"Completed step {step['step_id']}"],
+            "logs": [f"Completed step {step['step_id']}"],
         }
 
     except Exception as e:
@@ -162,7 +162,7 @@ async def execute_step(state: AgentState) -> dict:
             "status": "executing",
             "retry_count": retry_count + 1,
             "errors": state.get("errors", []) + [f"Step {step['step_id']} failed: {e}"],
-            "logs": state.get("logs", []) + [f"Step {step['step_id']} failed: {e}"],
+            "logs": [f"Step {step['step_id']} failed: {e}"],
         }
 
 
@@ -187,6 +187,7 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
             content = response.content if isinstance(response.content, str) else str(response.content)
             return content
 
+        tool_messages.append(response)
         for tool_call in response.tool_calls:
             tool_name = tool_call.get("name", "")
             tool_args = tool_call.get("args", {})
@@ -197,7 +198,8 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
                 "args": tool_args,
             })
 
-            result = registry.execute(tool_name, **tool_args)
+            import asyncio
+            result = await asyncio.to_thread(registry.execute, tool_name, **tool_args)
             result_text = result.output if result.success else f"Error: {result.error}"
 
             await emit_event(state.get("task_id", ""), "tool_result", {

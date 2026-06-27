@@ -31,7 +31,7 @@ def dispatcher_node(state: AgentState) -> dict:
 
     return {
         "_worker_assignments": assignments,
-        "logs": state.get("logs", []) + [
+        "logs": [
             f"Dispatcher assigned {len(assignments)} workers with {len(steps)} total steps"
         ],
     }
@@ -72,12 +72,9 @@ def _make_worker_node(worker_name: str):
                 "result_preview": str(output)[:200],
             })
 
-        step_results = dict(state.get("step_results", {}))
-        step_results.update(results)
-
         return {
-            "step_results": step_results,
-            "logs": state.get("logs", []) + [f"{worker_name} completed {len(results)} steps"],
+            "step_results": results,
+            "logs": [f"{worker_name} completed {len(results)} steps"],
         }
     return worker_node
 
@@ -91,8 +88,8 @@ async def parallel_workers_node(state: AgentState) -> dict:
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    merged_step_results = dict(state.get("step_results", {}))
-    merged_logs = list(state.get("logs", []))
+    merged_step_results = {}
+    merged_logs = []
     for r in results:
         if isinstance(r, Exception):
             merged_logs.append(f"Worker error: {r}")
@@ -114,7 +111,7 @@ def aggregator_node(state: AgentState) -> dict:
     return {
         "final_result": combined,
         "status": "completed",
-        "logs": state.get("logs", []) + ["Fanout aggregator combined results"],
+        "logs": ["Fanout aggregator combined results"],
     }
 
 

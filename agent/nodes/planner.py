@@ -140,5 +140,5 @@ async def plan_task(state: AgentState) -> dict:
         "current_step_index": 0,
         "status": "planning",
         "retry_count": 0,
-        "logs": state.get("logs", []) + [f"Planned {len(steps)} steps (complexity={step_count})"],
+        "logs": [f"Planned {len(steps)} steps (complexity={step_count})"],
     }

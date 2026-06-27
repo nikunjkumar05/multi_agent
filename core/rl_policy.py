@@ -1,3 +1,5 @@
+import json
+import os
 import random
 
 import redis.asyncio as aioredis
@@ -20,31 +22,39 @@ CONTEXT_WEIGHTS: dict[str, dict[str, float]] = {
 
 MIN_TASKS_TO_LEARN = 5
 
+_DATA_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PERSIST_FILE = os.path.join(_DATA_DIR, "rl_policy.json")
+
 
 class RLPolicy:
-    def __init__(self, redis: aioredis.Redis) -> None:
+    def __init__(self, redis: aioredis.Redis, persist_path: str = _PERSIST_FILE) -> None:
         self.redis = redis
+        self.persist_path = persist_path
         self.arms: dict[str, dict[str, float]] = {}
+        self.total_tasks: int = 0
 
     async def load(self) -> None:
-        self.arms = {}
+        pipe = await self.redis.pipeline()
         for topo in TOPOLOGIES:
-            arm_key = f"rl_policy:arm:{topo}"
-            raw = await self.redis.hgetall(arm_key)
+            pipe.hgetall(f"rl_policy:arm:{topo}")
+        pipe.get("rl_policy:total_tasks")
+        results = await pipe.execute()
+
+        *arm_results, task_count = results
+        self.total_tasks = int(task_count) if task_count else 0
+
+        self.arms = {}
+        for topo, raw in zip(TOPOLOGIES, arm_results):
             if raw:
                 self.arms[topo] = {
-                    "alpha": float(raw.get(b"alpha", raw.get("alpha", 1.0))),
-                    "beta": float(raw.get(b"beta", raw.get("beta", 1.0))),
+                    "alpha": float(raw.get("alpha", 1.0)),
+                    "beta": float(raw.get("beta", 1.0)),
                 }
             else:
                 self.arms[topo] = {"alpha": 1.0, "beta": 1.0}
 
-    async def _get_total_tasks(self) -> int:
-        val = await self.redis.get("rl_policy:total_tasks")
-        return int(val) if val else 0
-
-    async def _increment_tasks(self) -> None:
-        await self.redis.incr("rl_policy:total_tasks")
+        if self.total_tasks == 0:
+            self._load_from_file()
 
     def _extract_features(self, task: str) -> dict[str, bool]:
         task_lower = task.lower()
@@ -73,8 +83,8 @@ class RLPolicy:
         return weights
 
     async def select_topology(self, task: str, budget_band: str) -> str | None:
-        total = await self._get_total_tasks()
-        if total < MIN_TASKS_TO_LEARN:
+        await self.load()
+        if self.total_tasks < MIN_TASKS_TO_LEARN:
             return None
 
         await self.load()
@@ -92,3 +102,27 @@ class RLPolicy:
             await self.redis.hincrbyfloat(arm_key, "beta", 1.0 - combined)
 
         await self.redis.incr("rl_policy:total_tasks")
+        self.total_tasks += 1
+
+        self.arms[topology] = self.arms.get(topology, {"alpha": 1.0, "beta": 1.0})
+        if combined > 0.5:
+            self.arms[topology]["alpha"] += combined
+        else:
+            self.arms[topology]["beta"] += (1.0 - combined)
+        self._save_to_file()
+
+    def _load_from_file(self) -> None:
+        try:
+            with open(self.persist_path, "r") as f:
+                data = json.load(f)
+            self.arms = data.get("arms", {})
+            self.total_tasks = data.get("total_tasks", 0)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+    def _save_to_file(self) -> None:
+        data = {"arms": self.arms, "total_tasks": self.total_tasks}
+        tmp = self.persist_path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(json.dumps(data))
+        os.replace(tmp, self.persist_path)

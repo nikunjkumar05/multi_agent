@@ -1,3 +1,5 @@
+import asyncio
+
 from pydantic import BaseModel, Field, field_validator
 
 from core.audit import get_audit_trail
@@ -70,7 +72,7 @@ def rule_based_select_topology(task: str) -> str:
     if any(kw in task_lower for kw in supervisor_kw):
         return "supervisor"
 
-    pipeline_kw = ["write", "code", "function", "implement", "create", "generate", "build", "develop", "script"]
+    pipeline_kw = ["function", "implement", "code", "class", "script"]
     if any(kw in task_lower for kw in pipeline_kw):
         return "pipeline"
 
@@ -95,24 +97,43 @@ class CostTierOptimizer:
         from core.redis_client import get_redis
         from core.rl_policy import RLPolicy
 
-        rule_topo = rule_based_select_topology(task)
+        # 1. Try LLM semantic classification
+        llm_decision: OptimizerDecision | None = None
+        try:
+            prompt = OPTIMIZER_PROMPT.format(task=task, spent_pct=budget.spent_pct)
+            llm_decision = await asyncio.wait_for(
+                self._structured_llm.ainvoke(prompt),
+                timeout=10.0,
+            )
+            if llm_decision.topology not in VALID_TOPOLOGIES:
+                llm_decision = None
+        except Exception:
+            llm_decision = None
 
+        # 2. Fallback: rule-based keywords if LLM failed
+        if llm_decision is None:
+            rule_topo = rule_based_select_topology(task)
+            llm_decision = self._make_fallback_decision(task, rule_topo)
+
+        # 3. RL refinement: override when trained enough
         redis = await get_redis()
         rl = RLPolicy(redis)
         rl_topology = await rl.select_topology(task, budget.get_band().value)
 
-        if rl_topology and rule_topo == "single":
+        rule_topo = rule_based_select_topology(task)
+        if rl_topology and (rule_topo == "single" or rl.total_tasks >= 10):
             chosen = rl_topology
-            rationale = f"RL policy selected {rl_topology}"
+            rationale = f"RL policy selected {rl_topology} (trained on {rl.total_tasks} tasks)"
         else:
-            chosen = rule_topo
-            rationale = f"Rule-based: {rule_topo}"
+            chosen = llm_decision.topology
+            rationale = llm_decision.rationale
 
+        # 4. Use LLM's model tiers (with RL topology override)
         decision = OptimizerDecision(
             topology=chosen,
-            model_tiers={"planner": "standard", "executor": "standard", "validator": "cheap", "judge": "standard"},
+            model_tiers=llm_decision.model_tiers,
             rationale=rationale,
-            alternatives_considered=[],
+            alternatives_considered=llm_decision.alternatives_considered,
         )
 
         if decision.topology not in VALID_TOPOLOGIES:

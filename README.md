@@ -2,7 +2,7 @@
 
 This repository contains the implementation for the AAAI-26 paper "BAMAS: Structuring Budget-Aware Multi-Agent Systems". Yang, L., Luo, J., Liu, X., Lou, Y., & Chen, Z. (2026). BAMAS: Structuring Budget-Aware Multi-Agent Systems.
 
-A budget-aware multi-agent system that accepts plain-English tasks via API, uses a cost-tier optimizer (adapted from [BAMAS](https://arxiv.org/abs/2504.11428)) to select topology and model tiers, then orchestrates four specialized agents with reasoning-divergence escalation and mid-execution topology collapse under budget pressure.
+A budget-aware multi-agent system that accepts plain-English tasks via API, uses a cost-tier optimizer (adapted from [BAMAS](https://arxiv.org/abs/2504.11428)) to select topology and model tiers, then orchestrates four specialized agents with reasoning-divergence escalation and pre-execution topology degradation under budget pressure.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ POST /execute {task, budget_usd}
 - **Cost-tier optimizer** — LLM-based topology selection with rule-based fallback (BAMAS adaptation)
 - **5 topology modes** — single, pipeline, supervisor, fanout, ensemble
 - **Reasoning-divergence escalation** — Judge invoked when Validator confidence drops
-- **Mid-execution topology collapse** — degrades ensemble → fanout → supervisor → pipeline → single under budget pressure
+- **Pre-execution topology collapse** — degrades ensemble → fanout → supervisor → pipeline → single before graph starts
 - **Budget bands** — HEALTHY (<70%), TIER_DOWNGRADE (70-90%), STRUCTURAL_DEGRADE (90-100%), CRITICAL (>100%)
 - **Mistral LLM** — configurable via `.env`, supports OpenAI/Ollama fallbacks
 - **Real-time frontend** — status polling, audit trail display
@@ -194,8 +194,12 @@ Tests: topology sweep, budget sweep, task complexity, concurrent execution.
 - **Framework**: LangGraph + LangChain
 - **API**: FastAPI + Uvicorn
 - **Frontend**: Vanilla JS + CSS (no build step)
-- **State**: In-memory dict (V1), Redis (V2)
-- **Solver**: scipy.optimize.milp (V1), ILP + RL (V2)
+- **State**: In-memory dict + Redis pub/sub events
+- **Optimizer**: LLM semantic classification + rule-based fallback + RL refinement
+
+## Technical Deep Dive
+
+See [`learn.md`](learn.md) for a comprehensive technical reference covering every module, data flow, code path, and implementation detail.
 
 ## License
 

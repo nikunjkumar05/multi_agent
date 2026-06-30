@@ -6,7 +6,7 @@ import redis.asyncio as aioredis
 
 TOPOLOGIES = ["single", "pipeline", "supervisor", "fanout", "ensemble"]
 
-CODE_KEYWORDS = ["write", "code", "function", "implement", "create", "generate", "build", "develop", "script"]
+CODE_KEYWORDS = ["function", "implement", "code", "class", "script"]
 RESEARCH_KEYWORDS = ["explain", "research", "compare", "why", "how does", "describe", "summarize", "review"]
 DATA_KEYWORDS = ["analyze", "data", "parallel", "bulk", "process"]
 VERIFY_KEYWORDS = ["verify", "audit", "validate", "critical", "security", "proof"]

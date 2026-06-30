@@ -1,28 +1,17 @@
-# Multi-Agent Task Executor — Architecture Plan (Final)
-
-## Revision notes — fixes applied in this version
-
-1. **V1/V2 split corrected.** V1 ships ILP + a rule-based topology heuristic only. RL-based topology selection moves to V2, with its own module and dependency — no longer silently assumed in V1.
-2. **ILP solver specified precisely.** `scipy.optimize.milp` (mixed-integer linear programming), not `linprog` — needed for discrete topology/tier decision variables.
-3. **Escalation engine's divergence source is now topology-aware.** Ensemble/fan-out compares across parallel agents; supervisor/pipeline requires the Validator to independently re-derive a reasoning chain to compare against the Executor's.
-4. **Audit field units disambiguated.** `budget_at_decision` → `budget_remaining_usd`.
-5. **ATS cost-reduction figure corrected.** The verified published BAMAS result is ~3x cost reduction at equal accuracy on GSM8K (not 86%). Bullet updated — replace with your own measured number once V1/V2 are benchmarked.
-6. **Tech stack versions updated** against current PyPI releases (FastAPI, Pydantic). LangGraph 1.2.x was already correct.
-
----
+# BAMAS — Architecture Plan (Synced to Code)
 
 ## What We're Building
-A **budget-aware multi-agent system** that accepts a plain-English task + budget via API, uses a cost-tier optimizer (ILP for V1, ILP+RL for V2, adapted from BAMAS) to select topology and model tiers, then orchestrates four specialized agents (Planner, Executor, Validator, Judge) with a standalone escalation engine that triggers on reasoning divergence, and a budget governor that collapses topology mid-execution when cost runs low. Deployed via FastAPI + Docker + GitHub Actions in sub-5-minute CI/CD cycles.
+A **budget-aware multi-agent system** that accepts a plain-English task + budget via API, uses a cost-tier optimizer (LLM semantic classifier + rule-based fallback + contextual Thompson Sampling RL) to select topology and model tiers, then orchestrates four specialized agents (Planner, Executor, Validator, Judge) with a reasoning-divergence escalation engine and a budget governor that degrades topology pre-execution when cost is low. Deployed via FastAPI + Docker + GitHub Actions.
 
 ## Where Differentiation Lives
 | Layer | Type | Novelty |
 |-------|------|---------|
-| API Gateway | Standard | Adopted from commodity FastAPI |
-| Cost-tier optimizer | Standard | ILP (+RL in V2), adapted from BAMAS (AAAI 2026) |
-| Agent team | Standard | Standard agent decomposition |
-| **Escalation engine** | **Novel ★** | Escalate on reasoning divergence, not vote count |
-| **Budget governor** | **Novel ★** | Mid-task structural collapse, not just model swapping |
-| State, audit, infra | Standard | Redis, audit log, CI/CD, adopted from research |
+| API Gateway | Standard | FastAPI with WebSocket real-time events |
+| Cost-tier optimizer | Novel ★ | LLM semantic classification + contextual Thompson Sampling RL (no ILP) |
+| Agent team | Standard | 4 specialized nodes with tool-binding ReAct loop |
+| **Escalation engine** | **Novel ★** | Escalate on reasoning divergence + confidence threshold, not vote count |
+| **Budget governor** | **Novel ★** | Topology degradation chain under budget pressure, not just model swapping |
+| State, audit, infra | Standard | Redis pub/sub, audit trail, Docker, CI/CD |
 
 ---
 
@@ -30,52 +19,62 @@ A **budget-aware multi-agent system** that accepts a plain-English task + budget
 ```mermaid
 flowchart TB
     subgraph "Layer 1 — API Gateway"
-        REQ["POST /execute<br/>{task, budget, token}"]
-        JWT["JWT Auth Middleware"]
-        REQ --> JWT
+        POST["POST /execute<br/>{task, budget_usd, topology?}"]
+        WS["WebSocket /ws/{task_id}<br/>Real-time streaming"]
+        TASK["GET /tasks/{task_id}"]
+        AUDIT["GET /audit/{task_id}"]
     end
     subgraph "Layer 2 — Cost-tier Optimizer"
-        OPT["ILP (V1) + RL (V2)<br/>adapted from BAMAS"]
-        OPT_IN["Inputs: task + budget + agent pool"]
-        OPT_OUT["Output: {topology, model_tiers, topology_report}"]
-        OPT --> OPT_OUT
+        LLM_CLS["LLM Semantic Classification<br/>primary: structured output"]
+        RULE_FB["Rule-based keyword fallback"]
+        RL["Contextual Thompson Sampling<br/>5 arms, 4 context features"]
+        LLM_CLS -->|failover| RULE_FB
+        RULE_FB -->|refinement| RL
     end
     subgraph "Layer 3 — Agent Team"
-        PLAN["Planner<br/>Standard Model<br/>task → steps"]
-        EXEC["Executor<br/>Standard Model<br/>tools + actions"]
-        VAL["Validator<br/>Cheap Model<br/>quality check"]
-        JUDGE["Judge<br/>Frontier Model<br/>called conditionally"]
+        PLAN["Planner<br/>Standard Model<br/>task → 1-3 steps"]
+        EXEC["Executor<br/>Standard Model<br/>ReAct loop + tools"]
+        VAL["Validator<br/>Cheap Model<br/>confidence + divergence"]
+        JUDGE["Judge<br/>Frontier/Top Model<br/>conditional arbitration"]
+        FINAL["Finalizer<br/>deduplicate + combine"]
     end
     subgraph "Layer 4 — Escalation Engine ★"
-        CONF["Confidence Check"]
-        DIV["Reasoning Divergence Check"]
-        ROUTE_ESC["Escalation Decision<br/>skip or escalate to Judge"]
+        CHECK["confidence ≥ 0.85?"]
+        DIV["reasoning_diverged?"]
+        ROUTE{"escalate?"}
     end
     subgraph "Layer 5 — Budget Governor ★"
-        BANDS["Budget Bands<br/>70% → downgrade tiers<br/>90% → collapse topology<br/>Critical → skip Judge"]
-        DEGRADE["Structural Collapse<br/>ensemble-of-5 → 3 → 1<br/>mid-execution"]
+        BANDS["4 Budget Bands<br/>Healthy → Tier<br/>→ Structural → Critical"]
+        DEGRADE["Topology Degradation Chain<br/>ensemble→fanout→supervisor→pipeline→single"]
     end
-    subgraph "Layer 6 — State, Audit, Infra"
-        REDIS["Redis Checkpointer<br/>crash-safe state"]
-        AUDIT["Audit Trail API<br/>GET /audit/{task_id}"]
+    subgraph "Layer 6 — Events, Audit, Infra"
+        EVENTS["EventBroadcaster<br/>Redis pub/sub"]
+        REDIS_DB["Redis<br/>event history + RL persistence"]
+        AUDIT_LOG["Audit Trail<br/>in-memory singleton"]
         DOCKER["Docker + Redis sidecar"]
-        CI["GitHub Actions<br/><5min deploy"]
+        CI["GitHub Actions"]
     end
-    JWT --> OPT
-    OPT_OUT --> PLAN
+    POST -->|"Background task"| LLM_CLS
+    LLM_CLS -->|topology + tiers| DEGRADE
+    BANDS --> DEGRADE
+    DEGRADE -->|degraded topology| PLAN
     PLAN --> EXEC
     EXEC --> VAL
-    VAL --> CONF
-    CONF -->|"high confidence"| REDIS
-    CONF -->|"low confidence"| DIV
-    DIV -->|"no divergence"| REDIS
-    DIV -->|"divergence detected"| JUDGE
-    JUDGE --> REDIS
-    REDIS --> AUDIT
-    BANDS --> DEGRADE
-    DEGRADE -.->|"collapse at 90%"| EXEC
-    REDIS --> DOCKER
-    DOCKER --> CI
+    VAL --> CHECK
+    CHECK -->|"≥ 0.85"| FINAL
+    CHECK -->|"< 0.85"| DIV
+    DIV -->|"no divergence"| FINAL
+    DIV -->|"diverged"| ROUTE
+    ROUTE -->|"budget allows"| JUDGE
+    ROUTE -->|"budget critical"| FINAL
+    JUDGE --> FINAL
+    PLAN --> EVENTS
+    EXEC --> EVENTS
+    VAL --> EVENTS
+    JUDGE --> EVENTS
+    EVENTS --> WS
+    AUDIT_LOG --> AUDIT
+    EVENTS --> REDIS_DB
 ```
 
 ---
@@ -84,129 +83,165 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph "1. Single Agent"
-        A1["LLM"] --> T1["Tools"]
+        A1["Planner"] --> A2["Executor"]
+        A2 --> A3["Validator"]
+        A3 -->|"loop/retry (2x)"| A2
+        A3 -->|"done"| J1["Judge (optional)"]
+        J1 --> F1["Finalizer"]
     end
     subgraph "2. Supervisor + Workers"
-        S["Supervisor<br/>routes work"] --> W1["Worker A"]
-        S --> W2["Worker B"]
-        S --> W3["Worker C"]
+        S["Supervisor<br/>LLM dispatches"] --> W1["Executor Step 1"]
+        S --> W2["Executor Step 2"]
         W1 --> S
         W2 --> S
-        W3 --> S
+        S --> J2["Judge"]
+        J2 --> F2["Finalizer"]
     end
     subgraph "3. Pipeline"
-        P1["Stage 1"] --> P2["Stage 2"] --> P3["Stage 3"]
+        P1["Planner"] --> P2["Executor"]
+        P2 --> P3["Validator"]
+        P3 --> P4["Judge (always)"]
+        P4 --> P5["Finalizer"]
     end
     subgraph "4. Fan-Out/Fan-In"
-        DIS["Dispatcher"] --> F1["Worker 1"]
-        DIS --> F2["Worker 2"]
-        DIS --> F3["Worker 3"]
-        F1 --> AGG["Aggregator"]
-        F2 --> AGG
-        F3 --> AGG
+        D1["Dispatcher"] --> F3["Worker 1"]
+        D1 --> F4["Worker 2"]
+        D1 --> F5["Worker 3"]
+        F3 --> A4["Aggregator"]
+        F4 --> A4
+        F5 --> A4
+        A4 --> J4["Judge"]
+        J4 --> F6["Finalizer"]
     end
     subgraph "5. Ensemble"
-        E1["Agent A<br/>prompt variant 1"] --> J["Judge<br/>selects best"]
-        E2["Agent B<br/>prompt variant 2"] --> J
-        E3["Agent C<br/>different model"] --> J
+        SN["Planner"] --> E1["Agent A<br/>analytic"]
+        SN --> E2["Agent B<br/>creative"]
+        SN --> E3["Agent C<br/>domain expert"]
+        E1 --> J5["Judge<br/>selects/improves"]
+        E2 --> J5
+        E3 --> J5
+        J5 --> F7["Finalizer"]
     end
 ```
 
 ---
 
-## Escalation Engine ★ (Layer 4)
+## Request Flow
 ```mermaid
-flowchart LR
-    subgraph "Input"
-        VAL_OUT["Validator receives<br/>Executor output"]
+sequenceDiagram
+    participant C as Client
+    participant API as FastAPI
+    participant OPT as Optimizer
+    participant RL as RL Policy
+    participant DG as Degrader
+    participant G as LangGraph
+    participant LLM as LLM
+    participant R as Redis
+
+    C->>API: POST /execute {task, budget_usd}
+    API->>API: Create BudgetTracker, launch bg task
+    API-->>C: {task_id, status: "pending"}
+
+    alt Topology override
+        OPT->>OPT: Use override directly
+    else
+        OPT->>LLM: Semantic classification (structured output)
+        LLM-->>OPT: {topology, model_tiers, rationale}
+        alt LLM fails/timeout
+            OPT->>OPT: Rule-based keyword fallback
+        end
+        OPT->>RL: Query RL policy (if ≥5 tasks trained)
+        RL-->>OPT: Thompson-sampled topology (optional)
+        OPT->>OPT: Merge LLM + RL → final topology
     end
-    subgraph "Confidence Check"
-        CONF["Confidence score"]
-        CONF -->|"> 0.85"| SKIP["Skip Judge ★<br/>Save frontier cost"]
-        CONF -->|"≤ 0.85"| DIV
+
+    OPT->>DG: Check budget band
+    DG->>DG: Degrade if band ≥ STRUCTURAL_DEGRADE
+    DG-->>OPT: (possibly) degraded topology
+
+    OPT->>G: compile_graph(topology)
+    G->>LLM: Planner → steps
+    loop For each step
+        G->>LLM: Executor → ReAct loop
+        G->>LLM: Validator → confidence + divergence
+        alt Escalation needed
+            G->>LLM: Judge → arbitrate/improve
+        end
     end
-    subgraph "Divergence Source — topology-dependent ★"
-        SRC_ENS["Ensemble/fan-out:<br/>compare across parallel agents"]
-        SRC_SEQ["Supervisor/pipeline:<br/>Validator re-derives independently,<br/>compares vs Executor's chain"]
-    end
-    subgraph "Reasoning Divergence Check ★"
-        DIV["Has reasoning diverged?<br/>Not just different answers,<br/>different reasoning chains"]
-        DIV -->|"No"| ACCEPT["Accept Executor output"]
-        DIV -->|"Yes"| ESCALATE["Escalate to Judge<br/>(Frontier Model)"]
-    end
-    subgraph "Judge Decision"
-        ESCALATE --> J["Judge evaluates<br/>both reasoning paths"]
-        J --> VERDICT["Selects best output<br/>OR merges both"]
-    end
-    VAL_OUT --> CONF
-    SRC_ENS --> DIV
-    SRC_SEQ --> DIV
-    SKIP --> DONE["Store result"]
-    ACCEPT --> DONE
-    VERDICT --> DONE
+    G->>G: Finalizer → deduplicate
+    G-->>API: result + audit
+    API->>R: Publish event (pub/sub)
+    C->>API: WebSocket /ws/{task_id}
+    R-->>C: Streaming events
 ```
-**Note:** in supervisor/pipeline topologies, Validator must actually re-derive an independent reasoning chain (not just classify the Executor's output) for there to be anything to diff. This changes Validator's cost/latency profile slightly — budget for it.
 
 ---
 
-## Cost-tier Optimizer — Structured Output
-```json
+## Cost-tier Optimizer — Flow
+1. **LLM semantic classification** (primary) — `self._structured_llm` with OPTIMIZER_PROMPT returns `OptimizerDecision` (topology, model_tiers, rationale, alternatives). 10s timeout.
+2. **Rule-based fallback** — keyword matching if LLM fails/returns invalid topology.
+3. **RL refinement** — contextual Thompson Sampling over 5 arms. 4 context features (is_code, is_research, is_data, is_verify) with per-arm multipliers. Only overrides after ≥10 trained tasks.
+
+### OptimizerDecision schema
+```
 {
   "topology": "supervisor",
   "model_tiers": {
     "planner": "standard",
     "executor": "standard",
     "validator": "cheap",
-    "judge": "conditional_frontier"
+    "judge": "frontier"
   },
-  "audit_entry": {
-    "task_summary": "Research and draft report on quantum computing trends",
-    "budget_remaining_usd": 1.00,
-    "rationale": "Complex multi-step research task with branching subtopics. Supervisor topology allows dynamic delegation to specialist workers. Standard models sufficient for planning and execution; validator can use cheap model. Judge reserved for final quality arbitration if disagreement arises.",
-    "alternatives_considered": [
-      {"topology": "single", "rejected_reason": "task too complex for single agent (complexity=7/10)"},
-      {"topology": "pipeline", "rejected_reason": "low parallelism potential (score=0.3)"}
-    ]
-  }
+  "rationale": "Multi-step research task...",
+  "alternatives_considered": [
+    {"topology": "single", "reason": "task too complex"},
+    {"topology": "pipeline", "reason": "low parallelism"}
+  ]
 }
 ```
 
 ---
 
-## Budget Governor Bands ★ (Layer 5)
-| Spent | Budget Remaining | Action |
-|-------|-----------------|--------|
-| **<70%** | >30% | Full topology, all tiers. Normal operation. |
-| **70-90%** | 10-30% | Downgrade model tiers only (frontier → standard, standard → cheap). Topology unchanged. |
-| **90%+** | <10% | Collapse topology mid-execution. Ensemble-of-5 → ensemble-of-3 → single pipeline. Re-route through optimizer with degraded budget. |
-| **Critical** | ~0% | Skip Judge entirely. Return best available result immediately. |
+## Escalation Engine ★
+```
+Validator confidence ≥ 0.85? → Yes → skip Judge (save cost)
+                           → No  → reasoning_diverged? → No → accept executor output
+                                                        → Yes → budget allows? → Yes → escalate to Judge
+                                                                              → No  → skip Judge (critical)
+```
+
+Current implementation is threshold-based. Not topology-aware (does not re-derive reasoning chain for supervisor/pipeline).
 
 ---
 
-## Build Plan
+## Budget Governor Bands ★
+| Spent | Band | Action |
+|-------|------|--------|
+| **<70%** | HEALTHY | Full topology, all tiers |
+| **70-90%** | TIER_DOWNGRADE | Downgrade model tiers only (frontier→standard, standard→cheap) |
+| **90-100%** | STRUCTURAL_DEGRADE | Collapse topology: ensemble→fanout→supervisor→pipeline→single |
+| **>100%** | CRITICAL | Single topology, cheap model only, skip Judge |
 
-### V1 — Weeks (Demo-Ready)
-| Module | Files | Key Logic |
-|--------|-------|-----------|
-| **Cost-tier Optimizer** | `core/optimizer.py`, `core/budget.py` | `scipy.optimize.milp` for model-tier selection + rule-based topology heuristic, adapted from BAMAS. RL deferred to V2. |
-| **Agent Team** | `agent/nodes/planner.py`, `executor.py`, `validator.py`, `judge.py` | 4 specialized agents |
-| **Topology Templates** | `agent/topologies/single.py`, `supervisor.py`, `pipeline.py`, `fanout.py`, `ensemble.py` | 5 static graph builders |
-| **Audit Trail** | `api/routes/audit.py`, `core/audit.py` | Every decision logged, exposed via GET /audit/{id} |
-| **API + Infra** | `api/main.py`, `Dockerfile`, `docker-compose.yml`, `.github/workflows/deploy.yml` | FastAPI, JWT, Redis sidecar, Docker build |
+Degradation happens **pre-execution** (before graph invocation), not mid-execution.
 
-### V2 — Months (Defensible IP)
-| Module | Files | Key Logic |
-|--------|-------|-----------|
-| **Escalation Engine ★** | `agent/nodes/escalation.py`, `core/escalation.py` | Topology-dependent divergence check (cross-agent for ensemble/fan-out, Executor-vs-Validator re-derivation for supervisor/pipeline), conditional Judge routing |
-| **Budget Governor ★** | `core/degrader.py` | Mid-execution topology collapse: 5→3→1 at budget bands |
-| **RL Topology Policy** | `core/optimizer.py` (extended), `core/rl_policy.py` | Replaces V1's rule-based heuristic with a trained policy |
-| **Dynamic Graph Builder** | `agent/topologies/builder.py` | Construct LangGraph at runtime from optimizer output |
+---
 
-### V3 — When Data Exists
-| Module | Files | Key Logic |
-|--------|-------|-----------|
-| **Self-Opt Loop** | `core/learning.py` | Judge scores → improve optimizer decisions over time |
-| **Topology Stats DB** | `core/stats.py` | Track which topology × budget × task combo performs best |
+## RL Policy Details
+- **Algorithm**: Contextual Thompson Sampling
+- **Arms**: 5 topologies (single, pipeline, supervisor, fanout, ensemble)
+- **Context features**: is_code, is_research, is_data, is_verify (keyword-detected)
+- **Context weights**: Boost relevant arm by 2.0x (e.g., code→pipeline, research→supervisor)
+- **Reward**: quality × 0.7 + cost_efficiency × 0.3
+- **Persistence**: Redis + `rl_policy.json` fallback
+- **Cold start**: Returns None for first 5 tasks (no RL selection)
+
+---
+
+## Event System
+- `EventBroadcaster` wraps Redis pub/sub
+- Events pushed to Redis list (capped at 100) + published to channel
+- WebSocket at `/ws/{task_id}` subscribes to events
+- Events: planner_started, step_started, step_completed, validation_completed, tool_call, tool_result, judge_completed, task_completed
 
 ---
 
@@ -214,26 +249,23 @@ flowchart LR
 ```
 multi_agent/
 ├── agent/
-│   ├── __init__.py
-│   ├── graph.py                # LangGraph builder
+│   ├── graph.py                # run_task() entry point
 │   ├── state.py                # AgentState TypedDict
 │   ├── nodes/
-│   │   ├── __init__.py
-│   │   ├── planner.py          # Standard model
-│   │   ├── executor.py         # Standard model
-│   │   ├── validator.py        # Cheap model
-│   │   ├── judge.py            # Frontier model (conditional)
-│   │   └── escalation.py       # ★ Reasoning divergence check
+│   │   ├── planner.py          # Standard LLM (task→1-3 steps)
+│   │   ├── executor.py         # Standard LLM (ReAct loop with tools)
+│   │   ├── validator.py        # Cheap LLM (confidence + divergence)
+│   │   ├── judge.py            # Frontier LLM (arbitration)
+│   │   ├── escalation.py       # Route: judge vs continue
+│   │   └── finalizer.py        # Result dedup + combine
 │   ├── topologies/
-│   │   ├── __init__.py
 │   │   ├── single.py
-│   │   ├── supervisor.py
 │   │   ├── pipeline.py
+│   │   ├── supervisor.py
 │   │   ├── fanout.py
 │   │   ├── ensemble.py
-│   │   └── builder.py          # ★ Dynamic graph constructor (V2)
+│   │   └── builder.py          # compile_graph() selector
 │   └── tools/
-│       ├── __init__.py
 │       ├── registry.py
 │       ├── base.py
 │       ├── code_executor.py
@@ -241,39 +273,59 @@ multi_agent/
 │       ├── file_ops.py
 │       └── db_query.py
 ├── core/
-│   ├── __init__.py
 │   ├── config.py               # Pydantic Settings
 │   ├── llm.py                  # Multi-provider factory
-│   ├── optimizer.py            # Cost-tier optimizer (BAMAS-adapted, ILP V1 / +RL V2)
-│   ├── rl_policy.py            # ★ RL topology policy (V2)
-│   ├── escalation.py           # ★ Escalation engine (V2)
-│   ├── budget.py               # Budget tracker
-│   ├── degrader.py             # ★ Budget governor: structural collapse (V2)
-│   ├── audit.py                # Audit trail
-│   ├── learning.py             # Self-optimization loop (V3)
-│   └── stats.py                # Topology performance stats (V3)
+│   ├── optimizer.py            # LLM semantic + rule-based + RL
+│   ├── rl_policy.py            # Contextual Thompson Sampling
+│   ├── budget.py               # BudgetTracker (4 bands)
+│   ├── degrader.py             # Pre-execution topology degradation
+│   ├── escalation.py           # Threshold-based escalation
+│   ├── audit.py                # Audit trail singleton
+│   ├── events.py               # Redis pub/sub broadcaster
+│   ├── node_events.py          # emit_event helper
+│   └── redis_client.py         # Redis connection manager
 ├── api/
-│   ├── __init__.py
 │   ├── main.py                 # FastAPI app
-│   ├── routes/
-│   │   ├── __init__.py
-│   │   ├── execute.py          # POST /execute
-│   │   ├── tasks.py            # GET /tasks/{id}
-│   │   └── audit.py            # ★ GET /audit/{id}
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── schemas.py
-│   └── websocket.py
+│   ├── websocket.py            # /ws/{task_id}
+│   ├── models/schemas.py       # Pydantic models
+│   └── routes/
+│       ├── execute.py          # POST /execute
+│       ├── tasks.py            # GET /tasks/{id}
+│       └── audit.py            # GET /audit/{id}
+├── static/
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
 ├── tests/
-│   ├── __init__.py
+│   ├── stress_test.py
+│   ├── test_e2e.py
 │   ├── unit/
-│   ├── integration/
-│   └── fixtures/
+│   │   ├── test_budget.py
+│   │   ├── test_degrader.py
+│   │   ├── test_escalation.py
+│   │   ├── test_events.py
+│   │   ├── test_optimizer.py
+│   │   ├── test_rl_policy.py
+│   │   ├── test_audit.py
+│   │   ├── test_llm_helpers.py
+│   │   ├── test_executor_tools.py
+│   │   ├── test_finalizer.py
+│   │   ├── test_planner_complexity.py
+│   │   └── test_core_fixes.py
+│   └── integration/
+│       └── test_api.py
+├── docs/
+│   ├── plan.md
+│   └── file-spec.md
+├── learn.md
+├── commercialization_roadmap.md
+├── rl_policy.json
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml
+├── .env
 ├── .env.example
 ├── .gitignore
 ├── .dockerignore
@@ -286,32 +338,36 @@ multi_agent/
 | Category | Package | Version |
 |----------|---------|---------|
 | Runtime | Python | 3.12+ |
-| Orchestration | `langgraph` | 1.2.x *(verified current)* |
+| Orchestration | `langgraph` | 1.2.x |
 | LLM Primitives | `langchain-core` | 1.4.x |
 | LLM: OpenAI | `langchain-openai` | 0.3.x |
-| LLM: Anthropic | `langchain-anthropic` | 0.3.x |
+| LLM: Mistral | `langchain-mistralai` | 0.3.x |
 | LLM: Local | `langchain-ollama` | 0.3.x |
-| ILP Solver | `scipy.optimize.milp` | built-in (scipy ≥1.9) |
-| RL (V2 only) | `stable-baselines3` or lightweight custom bandit | pin once you reach V2 |
-| API | `fastapi` | **0.138.x** *(was 0.115.x — corrected against current PyPI)* |
+| API | `fastapi` | 0.115.x |
 | Server | `uvicorn[standard]` | 0.34.x |
-| Validation | `pydantic` | **2.13.x** *(was 2.10.x — corrected against current PyPI)* |
+| Validation | `pydantic` | 2.10.x |
 | Settings | `pydantic-settings` | 2.8.x |
 | Async HTTP | `httpx` | 0.28.x |
-| State Store | `redis` | 5.x |
+| State Store | `redis[hiredis]` | 5.x |
 | DB | `aiosqlite` | 0.20.x |
 | Serialization | `orjson` | 3.10.x |
+| Solver | `scipy` | 1.9.x |
 | Observability | `langsmith` | 0.3.x |
-| Linter | `ruff` | 0.12.x |
-| Type Checker | `mypy` | 1.14.x |
-| Test | `pytest` | 8.3.x |
 
 ---
 
-## ATS-Optimized Bullet Points
-> **Multi-Agent Task Executor** — Python, LangGraph, LangChain, FastAPI, Docker, GitHub Actions
->
-> - Built a cost-tier optimizer using ILP (`scipy.optimize.milp`) and reinforcement learning (adapted from BAMAS, AAAI 2026) that selects agent topology and model tiers under explicit budget constraints — based on a published joint-optimization method shown to cut cost by up to ~3x at equal accuracy vs. fixed-topology baselines *(replace with your own measured benchmark once built — don't carry over someone else's published number as your own result)*
-> - Designed a standalone escalation engine that triggers Judge escalation only when agents diverge on reasoning chains — not vote count or confidence thresholds — saving the most expensive frontier model call when Validator confidence is high
-> - Implemented a budget governor with mid-task structural collapse that degrades multi-agent topology in real-time (ensemble-of-5 → ensemble-of-3 → single pipeline) as budget depletes, ensuring graceful cost-quality trade-off where model-tier swapping alone is insufficient
-> - Deployed via FastAPI on Docker with Redis checkpointing and GitHub Actions CI/CD, achieving sub-5-minute production cycles from code push
+## Key Files and Their Roles
+| File | Role |
+|------|------|
+| `api/main.py:11` | FastAPI app, CORS, static mount |
+| `api/routes/execute.py:40` | POST /execute handler (background task) |
+| `api/websocket.py:8` | WebSocket endpoint (Redis pub/sub) |
+| `agent/graph.py:15` | `run_task()` — main entry point |
+| `agent/state.py:25` | `AgentState` TypedDict with reducers |
+| `agent/topologies/builder.py:22` | `compile_graph(topology)` — selects and compiles graph |
+| `core/optimizer.py:96` | `optimize()` — LLM semantic + rules + RL |
+| `core/rl_policy.py:29` | `RLPolicy` — Thompson Sampling |
+| `core/budget.py:16` | `BudgetTracker` — 4-band budget tracking |
+| `core/degrader.py:6` | `degrade_topology()` — pre-execution collapse |
+| `core/escalation.py:6` | `should_escalate()` — threshold-based check |
+| `core/events.py:7` | `EventBroadcaster` — Redis pub/sub |

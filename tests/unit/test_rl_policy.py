@@ -3,7 +3,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from core.rl_policy import RLPolicy, TOPOLOGIES, MIN_TASKS_TO_LEARN
+from core.rl_policy import RLPolicy, TOPOLOGIES
 
 
 class TestRLPolicyFeatures:

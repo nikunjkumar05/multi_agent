@@ -6,6 +6,7 @@ from agent.nodes.judge import ensemble_judge
 from agent.nodes.planner import plan_task
 from agent.nodes.validator import validate_result
 from agent.state import AgentState
+from core.budget_interrupt import budget_checkpoint
 
 MAX_RETRIES = 2
 
@@ -31,13 +32,15 @@ def build_pipeline_graph() -> StateGraph:
     builder = StateGraph(AgentState)
     builder.add_node("planner", plan_task)
     builder.add_node("executor", execute_step)
+    builder.add_node("budget_checkpoint", budget_checkpoint)
     builder.add_node("validator", validate_result)
     builder.add_node("judge", ensemble_judge)
     builder.add_node("finalizer", finalize_result)
 
     builder.add_edge(START, "planner")
     builder.add_edge("planner", "executor")
-    builder.add_edge("executor", "validator")
+    builder.add_edge("executor", "budget_checkpoint")
+    builder.add_edge("budget_checkpoint", "validator")
     builder.add_conditional_edges(
         "validator",
         _should_continue,

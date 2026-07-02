@@ -4,8 +4,9 @@ from typing import Any
 from agent.state import AgentState
 from agent.topologies.builder import compile_graph
 from core.audit import get_audit_trail
-from core.budget import BudgetTracker
+from core.budget import BudgetBand, BudgetTracker
 from core.degrader import degrade_topology
+from core.learning import record_task_result
 from core.node_events import emit_event
 from core.optimizer import CostTierOptimizer
 from core.redis_client import get_redis
@@ -23,10 +24,14 @@ async def run_task(
     if topology_override:
         degraded_topology = topology_override
         decision = CostTierOptimizer._make_fallback_decision(task, degraded_topology)
-        await emit_event(task_id, "topology_selected", {
-            "topology": degraded_topology,
-            "rationale": f"User override: {topology_override}",
-        })
+        await emit_event(
+            task_id,
+            "topology_selected",
+            {
+                "topology": degraded_topology,
+                "rationale": f"User override: {topology_override}",
+            },
+        )
     else:
         optimizer = CostTierOptimizer()
         decision = await optimizer.optimize(task=task, budget=budget, task_id=task_id)
@@ -41,8 +46,10 @@ async def run_task(
     initial_state: AgentState = {
         "task": task,
         "task_id": task_id,
+        "topology": degraded_topology,
         "decision": decision,
         "budget": budget,
+        "last_budget_band": BudgetBand.HEALTHY.value,
         "step_results": {},
         "final_result": None,
         "judge_output": None,
@@ -68,12 +75,16 @@ async def run_task(
         },
     )
 
-    await emit_event(task_id, "task_completed", {
-        "status": result.get("status", "failed"),
-        "final_result": str(result.get("final_result", ""))[:500],
-        "budget_spent_pct": budget.spent_pct,
-        "topology": degraded_topology,
-    })
+    await emit_event(
+        task_id,
+        "task_completed",
+        {
+            "status": result.get("status", "failed"),
+            "final_result": str(result.get("final_result", ""))[:500],
+            "budget_spent_pct": budget.spent_pct,
+            "topology": degraded_topology,
+        },
+    )
 
     if not topology_override:
         redis = await get_redis()
@@ -81,8 +92,15 @@ async def run_task(
             rl = RLPolicy(redis)
             status = result.get("status", "failed")
             quality = 1.0 if status == "completed" else 0.0
-            cost_eff = max(0.0, 1.0 - (budget.spent_pct / 100.0))
-            await rl.reward(topology=decision.topology, quality=quality, cost_efficiency=cost_eff)
+            await record_task_result(
+                rl_policy=rl,
+                topology=degraded_topology,
+                budget_band=budget.get_band().value,
+                task=task,
+                quality_score=quality,
+                cost_usd=budget.consumed_cost,
+                budget_total=budget.max_cost_usd,
+            )
 
     return {
         "task_id": task_id,

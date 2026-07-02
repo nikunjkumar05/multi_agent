@@ -1,9 +1,10 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from agent.graph import run_task
+from api.middleware.auth import require_auth
 from api.models.schemas import ExecuteRequest, TaskStatusResponse
 from core.budget import BudgetTracker
 
@@ -37,7 +38,7 @@ async def _run_background(task_id: str, task: str, budget: BudgetTracker, topolo
         )
 
 
-@router.post("/execute", response_model=TaskStatusResponse)
+@router.post("/execute", response_model=TaskStatusResponse, dependencies=[Depends(require_auth)])
 async def execute(req: ExecuteRequest, bg: BackgroundTasks) -> TaskStatusResponse:
     task_id = str(uuid.uuid4())
     budget = BudgetTracker(max_cost_usd=req.budget_usd)

@@ -32,3 +32,6 @@ scipy>=1.9.0,<2.0.0
 
 # Observability
 langsmith>=0.3.0,<1.0.0
+
+# Authentication
+PyJWT>=2.8.0,<3.0.0

@@ -13,7 +13,9 @@ VALID_TOPOLOGIES = {"single", "supervisor", "pipeline", "fanout", "ensemble"}
 
 class OptimizerDecision(BaseModel):
     topology: Topology
-    model_tiers: dict[str, str] = Field(..., description="Model tier per agent role: planner, executor, validator, judge")
+    model_tiers: dict[str, str] = Field(
+        ..., description="Model tier per agent role: planner, executor, validator, judge"
+    )
     rationale: str = Field(description="Why this topology and tier allocation was chosen")
     alternatives_considered: list[dict[str, str]] = Field(description="Other topologies considered and why rejected")
 
@@ -72,7 +74,7 @@ def rule_based_select_topology(task: str) -> str:
     if any(kw in task_lower for kw in supervisor_kw):
         return "supervisor"
 
-    pipeline_kw = ["function", "implement", "code", "class", "script"]
+    pipeline_kw = ["function", "implement", "code", "class", "script", "create"]
     if any(kw in task_lower for kw in pipeline_kw):
         return "pipeline"
 
@@ -120,8 +122,10 @@ class CostTierOptimizer:
         rl = RLPolicy(redis)
         rl_topology = await rl.select_topology(task, budget.get_band().value)
 
+        from core.config import settings
+
         rule_topo = rule_based_select_topology(task)
-        if rl_topology and (rule_topo == "single" or rl.total_tasks >= 10):
+        if rl_topology and (rule_topo == "single" or rl.total_tasks >= settings.rl_min_tasks_for_override):
             chosen = rl_topology
             rationale = f"RL policy selected {rl_topology} (trained on {rl.total_tasks} tasks)"
         else:

@@ -1,17 +1,31 @@
+import os
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-from api.routes import audit, execute, tasks
 from api import websocket
+from api.routes import audit, estimate, execute, tasks
 
-import os
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan: initialise persistent resources on startup."""
+    from core.audit import audit_trail
+
+    await audit_trail.init_db()
+    yield
+    # Shutdown hooks can be added here if needed
+
 
 app = FastAPI(
-    title="Multi-Agent Task Executor",
-    description="Budget-aware multi-agent system with cost-tier optimizer and topology selection",
-    version="0.1.0",
+    title="BAMAS — Budget-Aware Multi-Agent System",
+    description="Budget-aware multi-agent system with cost-tier optimizer, RL topology selection, and topology degradation",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -25,6 +39,7 @@ app.add_middleware(
 app.include_router(execute.router)
 app.include_router(tasks.router)
 app.include_router(audit.router)
+app.include_router(estimate.router)
 app.include_router(websocket.router)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")

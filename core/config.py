@@ -1,8 +1,10 @@
-from pydantic_settings import BaseSettings
 from typing import Literal
 
+from pydantic_settings import BaseSettings
+
+
 class Settings(BaseSettings):
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     llm_provider: Literal["openai", "mistral", "ollama"] = "openai"
     openai_api_key: str | None = None
@@ -31,5 +33,15 @@ class Settings(BaseSettings):
     api_port: int = 8000
     jwt_secret: str = "change-me-in-production"
     rl_model_key: str = "rl_policy"
+
+    # RL policy tuning (thresholds exposed so they can be overridden in .env)
+    rl_min_tasks_for_selection: int = 5  # Tasks before RL starts suggesting topologies
+    rl_min_tasks_for_override: int = 10  # Tasks before RL can override the LLM decision
+    rl_quality_weight: float = 0.7  # Weight of quality score in the reward signal
+    rl_cost_efficiency_weight: float = 0.3  # Weight of cost efficiency in the reward signal
+
+    # Audit persistence
+    audit_db_path: str = "./workspace/audit.db"
+
 
 settings = Settings()

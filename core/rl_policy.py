@@ -14,13 +14,12 @@ VERIFY_KEYWORDS = ["verify", "audit", "validate", "critical", "security", "proof
 # Context boosts: when a feature is active, multiply the arm's sample by this weight.
 # Higher weight = more likely to be selected for that task type.
 CONTEXT_WEIGHTS: dict[str, dict[str, float]] = {
-    "is_code":     {"pipeline": 2.0, "single": 0.5, "supervisor": 0.7, "fanout": 0.8, "ensemble": 0.6},
+    "is_code": {"pipeline": 2.0, "single": 0.5, "supervisor": 0.7, "fanout": 0.8, "ensemble": 0.6},
     "is_research": {"supervisor": 2.0, "pipeline": 0.7, "single": 0.5, "fanout": 0.8, "ensemble": 0.6},
-    "is_data":     {"fanout": 2.0, "pipeline": 0.8, "single": 0.5, "supervisor": 0.7, "ensemble": 0.6},
-    "is_verify":   {"ensemble": 2.0, "pipeline": 0.6, "single": 0.5, "supervisor": 0.7, "fanout": 0.8},
+    "is_data": {"fanout": 2.0, "pipeline": 0.8, "single": 0.5, "supervisor": 0.7, "ensemble": 0.6},
+    "is_verify": {"ensemble": 2.0, "pipeline": 0.6, "single": 0.5, "supervisor": 0.7, "fanout": 0.8},
 }
 
-MIN_TASKS_TO_LEARN = 5
 
 _DATA_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PERSIST_FILE = os.path.join(_DATA_DIR, "rl_policy.json")
@@ -83,17 +82,19 @@ class RLPolicy:
         return weights
 
     async def select_topology(self, task: str, budget_band: str) -> str | None:
-        await self.load()
-        if self.total_tasks < MIN_TASKS_TO_LEARN:
-            return None
+        from core.config import settings
 
         await self.load()
+        if self.total_tasks < settings.rl_min_tasks_for_selection:
+            return None
         features = self._extract_features(task)
         weights = self._compute_context_weights(features)
         return self._thompson_sample(weights)
 
     async def reward(self, topology: str, quality: float, cost_efficiency: float) -> None:
-        combined = quality * 0.7 + cost_efficiency * 0.3
+        from core.config import settings
+
+        combined = quality * settings.rl_quality_weight + cost_efficiency * settings.rl_cost_efficiency_weight
 
         arm_key = f"rl_policy:arm:{topology}"
         if combined > 0.5:
@@ -108,7 +109,7 @@ class RLPolicy:
         if combined > 0.5:
             self.arms[topology]["alpha"] += combined
         else:
-            self.arms[topology]["beta"] += (1.0 - combined)
+            self.arms[topology]["beta"] += 1.0 - combined
         self._save_to_file()
 
     def _load_from_file(self) -> None:

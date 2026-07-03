@@ -7,14 +7,40 @@ from agent.tools.registry import registry
 from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
 
-MAX_TOOL_ITERATIONS = 5
+MAX_TOOL_ITERATIONS = 10
+
+
+def _extract_text(content) -> str:
+    """Extract plain text from LangChain content blocks.
+
+    Mistral API returns content as a list of blocks like:
+        [{'type': 'text', 'text': '...'}, {'type': 'reference', ...}]
+    This extracts just the text portions.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                texts.append(block)
+        return "\n".join(texts) if texts else str(content)
+    return str(content)
 
 TASK_TYPE_PROMPTS = {
     "code": (
         "You are an expert software engineer. Write clean, correct, well-structured code.\n"
         "Include error handling where appropriate. Follow best practices for the language.\n"
         "Use the code_executor tool to run and verify your code before returning the final result.\n"
-        "If the code fails, fix the errors and try again."
+        "If the code fails, fix the errors and try again.\n\n"
+        "CRITICAL RULES FOR CODE EXECUTION:\n"
+        "- Do NOT use input() — it will timeout. Use hardcoded test values instead.\n"
+        "- For CLI scripts with argparse, pass test arguments using the args parameter, e.g. args=[\"-l\", \"12\"].\n"
+        "- Do NOT call code_executor with the same code if it already failed.\n"
+        "- After code runs successfully ONCE, stop calling tools and return the final code as text.\n"
+        "- Always include print() to show output — bare expressions produce no output."
     ),
     "math": (
         "You are a mathematical expert. Show clear, step-by-step reasoning.\n"
@@ -169,6 +195,7 @@ async def execute_step(state: AgentState) -> dict:
 async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) -> str:
     budget = state.get("budget")
     tool_messages: list = []
+    executed_code_hashes: set[int] = set()
 
     for _iteration in range(MAX_TOOL_ITERATIONS):
         response = await llm.ainvoke(messages + tool_messages)
@@ -180,18 +207,28 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
             )
 
         if not isinstance(response, AIMessage):
-            content = response.content if isinstance(response.content, str) else str(response.content)
-            return content
+            return _extract_text(response.content)
 
         if not response.tool_calls:
-            content = response.content if isinstance(response.content, str) else str(response.content)
-            return content
+            return _extract_text(response.content)
 
         tool_messages.append(response)
         for tool_call in response.tool_calls:
             tool_name = tool_call.get("name", "")
             tool_args = tool_call.get("args", {})
             tool_id = tool_call.get("id", "")
+
+            # Dedup: skip re-execution of identical code that already ran
+            if tool_name == "code_executor":
+                code_str = tool_args.get("code", "")
+                code_hash = hash(code_str)
+                if code_hash in executed_code_hashes:
+                    tool_messages.append(ToolMessage(
+                        content="Same code was already executed and failed. Do NOT retry identical code. Return your final answer as text now.",
+                        tool_call_id=tool_id,
+                    ))
+                    continue
+                executed_code_hashes.add(code_hash)
 
             await emit_event(state.get("task_id", ""), "tool_call", {
                 "tool": tool_name,
@@ -213,5 +250,15 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
                 tool_call_id=tool_id,
             ))
 
-    last_content = messages[-1].content if messages else ""
-    return str(last_content)[:1000] + "\n\n[Tool loop limit reached]"
+    # Return the last AI response content, or accumulated tool results
+    last_ai_content = ""
+    for msg in reversed(tool_messages):
+        if isinstance(msg, AIMessage) and msg.content:
+            last_ai_content = _extract_text(msg.content)
+            break
+    if not last_ai_content:
+        # Fallback: collect all tool outputs
+        last_ai_content = "\n".join(
+            str(m.content)[:500] for m in tool_messages if isinstance(m, ToolMessage)
+        )
+    return str(last_ai_content)[:1000] + "\n\n[Tool loop limit reached]"

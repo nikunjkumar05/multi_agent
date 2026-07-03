@@ -125,7 +125,7 @@ class CostTierOptimizer:
         from core.config import settings
 
         rule_topo = rule_based_select_topology(task)
-        if rl_topology and (rule_topo == "single" or rl.total_tasks >= settings.rl_min_tasks_for_override):
+        if rl_topology and rl.total_tasks >= settings.rl_min_tasks_for_override:
             chosen = rl_topology
             rationale = f"RL policy selected {rl_topology} (trained on {rl.total_tasks} tasks)"
         else:

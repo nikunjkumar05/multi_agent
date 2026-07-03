@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # RL policy tuning (thresholds exposed so they can be overridden in .env)
     rl_min_tasks_for_selection: int = 5  # Tasks before RL starts suggesting topologies
-    rl_min_tasks_for_override: int = 10  # Tasks before RL can override the LLM decision
+    rl_min_tasks_for_override: int = 50  # Tasks before RL can override the LLM decision
     rl_quality_weight: float = 0.7  # Weight of quality score in the reward signal
     rl_cost_efficiency_weight: float = 0.3  # Weight of cost efficiency in the reward signal
 

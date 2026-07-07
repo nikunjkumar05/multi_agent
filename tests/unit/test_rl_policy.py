@@ -126,7 +126,8 @@ class TestColdStart:
     @pytest.mark.asyncio
     async def test_returns_topology_above_min_tasks(self):
         mock_redis = AsyncMock()
-        default_arm = {"alpha": b"1.0", "beta": b"1.0"}
+        # High alpha, low beta → confidence = 10/(10+1) = 0.909 > 0.85 threshold
+        default_arm = {"alpha": b"10.0", "beta": b"1.0"}
         pipe = MagicMock()
         pipe.execute = AsyncMock(return_value=[default_arm, default_arm, default_arm, default_arm, default_arm, b"10"])
         mock_redis.pipeline = AsyncMock(return_value=pipe)

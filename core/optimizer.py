@@ -13,6 +13,7 @@ VALID_TOPOLOGIES = {"single", "supervisor", "pipeline", "fanout", "ensemble"}
 
 class OptimizerDecision(BaseModel):
     topology: Topology
+    llm_topology: Topology | None = None  # LLM's original choice before RL override
     model_tiers: dict[str, str] = Field(
         ..., description="Model tier per agent role: planner, executor, validator, judge"
     )
@@ -123,18 +124,32 @@ class CostTierOptimizer:
         rl_topology = await rl.select_topology(task, budget.get_band().value)
 
         from core.config import settings
+        from core.learning import detect_task_type
 
         rule_topo = rule_based_select_topology(task)
+        llm_topology = llm_decision.topology
+        
         if rl_topology and rl.total_tasks >= settings.rl_min_tasks_for_override:
             chosen = rl_topology
             rationale = f"RL policy selected {rl_topology} (trained on {rl.total_tasks} tasks)"
+            confidence = rl._compute_confidence(rl_topology)
+            task_type = detect_task_type(task)
+            await rl.log_override(
+                task_id=task_id,
+                task=task,
+                llm_topology=llm_topology,
+                rl_topology=rl_topology,
+                confidence=confidence,
+                task_type=task_type,
+            )
         else:
-            chosen = llm_decision.topology
+            chosen = llm_topology
             rationale = llm_decision.rationale
 
         # 4. Use LLM's model tiers (with RL topology override)
         decision = OptimizerDecision(
             topology=chosen,
+            llm_topology=llm_topology if chosen != llm_topology else None,
             model_tiers=llm_decision.model_tiers,
             rationale=rationale,
             alternatives_considered=llm_decision.alternatives_considered,

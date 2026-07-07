@@ -8,15 +8,24 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import websocket
-from api.routes import audit, estimate, execute, tasks
+from api.routes import audit, estimate, execute, rl, tasks
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: initialise persistent resources on startup."""
     from core.audit import audit_trail
+    from core.redis_client import get_redis
+    from core.rl_policy import RLPolicy
 
     await audit_trail.init_db()
+
+    # Initialize RL policy SQLite schema
+    redis = await get_redis()
+    if redis:
+        rl = RLPolicy(redis)
+        await rl._ensure_db()
+
     yield
     # Shutdown hooks can be added here if needed
 
@@ -40,6 +49,7 @@ app.include_router(execute.router)
 app.include_router(tasks.router)
 app.include_router(audit.router)
 app.include_router(estimate.router)
+app.include_router(rl.router)
 app.include_router(websocket.router)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")

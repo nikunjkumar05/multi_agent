@@ -100,6 +100,7 @@ async def run_task(
                 quality_score=quality,
                 cost_usd=budget.consumed_cost,
                 budget_total=budget.max_cost_usd,
+                llm_topology=decision.llm_topology,
             )
 
     return {

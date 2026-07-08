@@ -8,6 +8,7 @@ from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
 
 MAX_TOOL_ITERATIONS = 10
+MAX_RETRIES = 2
 
 
 def _extract_text(content) -> str:
@@ -192,10 +193,23 @@ async def execute_step(state: AgentState) -> dict:
         updated_steps = list(steps)
         updated_steps[idx] = step
 
+        new_retry = retry_count + 1
+        # After MAX_RETRIES, advance past this step to prevent infinite loop
+        if new_retry >= MAX_RETRIES:
+            return {
+                "steps": updated_steps,
+                "step_results": step_results,
+                "current_step_index": idx + 1,
+                "status": "executing",
+                "retry_count": 0,
+                "errors": state.get("errors", []) + [f"Step {step['step_id']} failed after {MAX_RETRIES} retries: {e}"],
+                "logs": [f"Step {step['step_id']} failed after {MAX_RETRIES} retries — skipping"],
+            }
+
         return {
             "steps": updated_steps,
             "status": "executing",
-            "retry_count": retry_count + 1,
+            "retry_count": new_retry,
             "errors": state.get("errors", []) + [f"Step {step['step_id']} failed: {e}"],
             "logs": [f"Step {step['step_id']} failed: {e}"],
         }

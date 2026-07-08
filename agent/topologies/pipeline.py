@@ -11,6 +11,10 @@ MAX_RETRIES = 2
 
 
 def _should_continue(state: AgentState) -> str:
+    # Budget gate said skip judge — go straight to finalizer
+    if state.get("skip_judge"):
+        return "finalizer"
+
     errors = state.get("errors", [])
     retry_count = state.get("retry_count", 0)
     step_results = state.get("step_results", {})
@@ -24,8 +28,6 @@ def _should_continue(state: AgentState) -> str:
         if completed < len(steps):
             return "executor"
 
-    if state.get("skip_judge"):
-        return "finalizer"
     return "judge"
 
 

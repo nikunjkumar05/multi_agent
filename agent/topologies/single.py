@@ -12,6 +12,10 @@ MAX_RETRIES = 2
 
 
 def _route_after_validation(state: AgentState) -> str:
+    # Budget gate said skip judge — go straight to finalizer
+    if state.get("skip_judge"):
+        return "judge_or_finalizer"
+
     errors = state.get("errors", [])
     retry_count = state.get("retry_count", 0)
     step_results = state.get("step_results", {})

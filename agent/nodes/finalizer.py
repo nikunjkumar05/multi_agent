@@ -10,6 +10,7 @@ def _is_subset(a: str, b: str) -> bool:
 def finalize_result(state: AgentState) -> dict:
     errors = state.get("errors", [])
     step_results = state.get("step_results", {})
+    steps = state.get("steps") or state.get("plan_steps") or []
 
     if not step_results:
         return {
@@ -17,6 +18,10 @@ def finalize_result(state: AgentState) -> dict:
             "final_output": state.get("final_output") or state.get("final_result") or "",
             "final_result": state.get("final_output") or state.get("final_result") or "",
         }
+
+    # Check if all planned steps have results — completed tasks beat retry errors
+    all_done = len(step_results) >= len(steps) if steps else len(step_results) > 0
+    status = "completed" if all_done else ("failed" if errors else "completed")
 
     results_list = list(step_results.values())
 
@@ -33,7 +38,7 @@ def finalize_result(state: AgentState) -> dict:
             combined = best + "\n\n---\n\n" + "\n\n".join(unique_others)
 
     return {
-        "status": "failed" if errors else "completed",
+        "status": status,
         "final_output": combined,
-        "final_result": combined,  # backward compat
+        "final_result": combined,
     }

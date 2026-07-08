@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Any
 
 from agent.nodes.budget_gate import budget_gate_node
@@ -10,6 +11,8 @@ from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
 from langgraph.graph import END, START, StateGraph
 
+log = logging.getLogger(__name__)
+
 ENSEMBLE_PROMPTS = [
     "You are an analytical expert. Provide rigorous, data-driven analysis.",
     "You are a creative problem solver. Think outside the box and propose innovative solutions.",
@@ -18,6 +21,8 @@ ENSEMBLE_PROMPTS = [
 
 ENSEMBLE_ROLES = ["analytic", "creative", "domain_expert"]
 ENSEMBLE_TIERS = ["standard", "standard", "frontier"]
+
+_AGENT_TIMEOUT = 90  # hard timeout per agent (seconds)
 
 
 def _agent_variant(system_prompt: str, role: str, agent_key: str):
@@ -35,15 +40,35 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
 
         llm = create_llm(tier)
         prompt = f"{system_prompt}\n\nTask: {task}"
-        response = await llm.ainvoke(prompt)
-        content = response.content if hasattr(response, "content") else str(response)
+
+        try:
+            response = await asyncio.wait_for(
+                llm.ainvoke(prompt),
+                timeout=_AGENT_TIMEOUT,
+            )
+            content = response.content if hasattr(response, "content") else str(response)
+
+            if not content or (isinstance(content, str) and not content.strip()):
+                content = f"[Agent {role} returned empty output]"
+
+        except asyncio.TimeoutError:
+            log.warning("Agent %s timed out after %ds", agent_key, _AGENT_TIMEOUT)
+            content = f"[Agent {role} timed out after {_AGENT_TIMEOUT}s]"
+            response = None
+        except Exception as e:
+            log.warning("Agent %s failed: %s", agent_key, e)
+            content = f"[Agent {role} failed: {e}]"
+            response = None
 
         budget = state.get("budget")
-        if budget:
-            budget.record_usage(
-                tokens=estimate_tokens(response),
-                cost=estimate_cost(response, tier),
-            )
+        if budget and response is not None:
+            try:
+                budget.record_usage(
+                    tokens=estimate_tokens(response),
+                    cost=estimate_cost(response, tier),
+                )
+            except Exception:
+                pass
 
         await emit_event(task_id, "agent_completed", {
             "agent_key": agent_key,
@@ -59,9 +84,9 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
         candidate_outputs = dict(state.get("candidate_outputs", {}))
         candidate_outputs[agent_key] = {
             "output": content,
-            "confidence": 0.85,
+            "confidence": 0.85 if response is not None else 0.0,
             "tool_calls_count": 0,
-            "tool_errors_count": 0,
+            "tool_errors_count": 0 if response is not None else 1,
         }
 
         return {

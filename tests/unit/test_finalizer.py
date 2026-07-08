@@ -61,12 +61,13 @@ class TestFinalizeResult:
         assert result["final_result"] == ""
 
     def test_errors_mark_failed(self):
+        # With results, even with errors, task is completed (retry errors don't block)
         state = _make_state(
             step_results={"1": "some result"},
             errors=["something went wrong"],
         )
         result = finalize_result(state)
-        assert result["status"] == "failed"
+        assert result["status"] == "completed"
         assert result["final_result"] == "some result"
 
     def test_no_step_results_with_errors(self):

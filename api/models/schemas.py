@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class ExecuteRequest(BaseModel):
     task: str = Field(..., description="Plain-English task description")
-    budget_usd: float = Field(default=1.0, ge=0.01, le=100.0, description="Max budget in USD")
+    budget_usd: float = Field(default=1.0, ge=0.001, le=100.0, description="Max budget in USD")
     topology: str | None = Field(default=None, description="Force topology: single, pipeline, supervisor, fanout, ensemble")
 
 

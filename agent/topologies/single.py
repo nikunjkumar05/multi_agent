@@ -14,7 +14,7 @@ MAX_RETRIES = 2
 def _route_after_validation(state: AgentState) -> str:
     # Budget gate said skip judge — go straight to finalizer
     if state.get("skip_judge"):
-        return "judge_or_finalizer"
+        return "finalizer"
 
     errors = state.get("errors", [])
     retry_count = state.get("retry_count", 0)
@@ -29,13 +29,7 @@ def _route_after_validation(state: AgentState) -> str:
         if completed < len(steps):
             return "executor"
 
-    return "judge_or_finalizer"
-
-
-def _route_judge_or_finalizer(state: AgentState) -> str:
-    if state.get("skip_judge"):
-        return "finalizer"
-    return "judge"
+    return "escalation"
 
 
 def build_single_graph() -> StateGraph:
@@ -58,7 +52,8 @@ def build_single_graph() -> StateGraph:
         _route_after_validation,
         {
             "executor": "executor",
-            "judge_or_finalizer": "escalation",
+            "finalizer": "finalizer",
+            "escalation": "escalation",
         },
     )
     builder.add_conditional_edges(

@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any
 
@@ -12,6 +13,8 @@ from core.node_events import emit_event
 from core.optimizer import CostTierOptimizer
 from core.redis_client import get_redis
 from core.rl_policy import RLPolicy
+
+log = logging.getLogger(__name__)
 
 
 async def run_task(
@@ -91,13 +94,23 @@ async def run_task(
     }
 
     # Run with mid-execution degradation support
-    result = await run_task_with_degradation(
-        graph=graph,
-        initial_state=initial_state,
-        task_id=task_id,
-        topology=degraded_topology,
-        checkpointer=checkpointer,
-    )
+    try:
+        result = await run_task_with_degradation(
+            graph=graph,
+            initial_state=initial_state,
+            task_id=task_id,
+            topology=degraded_topology,
+            checkpointer=checkpointer,
+        )
+    except Exception as e:
+        log.exception("Task %s failed in orchestrator", task_id)
+        result = {
+            "status": "failed",
+            "final_output": None,
+            "topology": degraded_topology,
+            "degradation_count": 0,
+            "logs": [f"Orchestrator failed: {e}"],
+        }
 
     # Use final topology from orchestrator (may have degraded)
     final_topology = result.get("topology", degraded_topology)

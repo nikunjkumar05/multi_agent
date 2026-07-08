@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,9 +12,13 @@ from agent.state import AgentState
 from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
 
+log = logging.getLogger(__name__)
+
 WORKER_SYSTEM = """You are a worker agent assigned a specific subtask.
 Complete your assigned step(s) thoroughly and accurately.
 Return your result as plain text. Be specific and complete."""
+
+_WORKER_TIMEOUT = 90
 
 
 def dispatcher_node(state: AgentState) -> dict:
@@ -55,18 +60,38 @@ def _make_worker_node(worker_name: str):
                     f"Step {step['step_id']}: {step['description']}"
                 )),
             ]
-            response = await llm.ainvoke(messages)
 
-            budget = state.get("budget")
-            if budget:
-                budget.record_usage(
-                    tokens=estimate_tokens(response),
-                    cost=estimate_cost(response, tier),
+            try:
+                response = await asyncio.wait_for(
+                    llm.ainvoke(messages),
+                    timeout=_WORKER_TIMEOUT,
                 )
+                output = response.content if isinstance(response.content, str) else str(response.content)
+                if not output or not output.strip():
+                    output = f"[Worker {worker_name} returned empty output for step {step['step_id']}]"
 
-            output = response.content if isinstance(response.content, str) else str(response.content)
+                budget = state.get("budget")
+                if budget:
+                    try:
+                        budget.record_usage(
+                            tokens=estimate_tokens(response),
+                            cost=estimate_cost(response, tier),
+                        )
+                    except Exception:
+                        pass
+
+            except asyncio.TimeoutError:
+                log.warning("Worker %s timed out on step %s", worker_name, step["step_id"])
+                output = f"[Worker {worker_name} timed out on step {step['step_id']}]"
+                response = None
+            except Exception as e:
+                log.warning("Worker %s failed on step %s: %s", worker_name, step["step_id"], e)
+                output = f"[Worker {worker_name} failed on step {step['step_id']}: {e}]"
+                response = None
+
             results[step["step_id"]] = output
 
+            budget = state.get("budget")
             await emit_event(task_id, "step_completed", {
                 "step_id": step["step_id"],
                 "worker": worker_name,

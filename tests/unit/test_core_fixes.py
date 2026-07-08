@@ -42,7 +42,7 @@ def test_pipeline_should_continue_terminal_failure():
 
 
 def test_single_route_after_validation_terminal_failure():
-    # If there are errors and retry_count >= MAX_RETRIES, and all steps done, should return "judge_or_finalizer"
+    # If there are errors and retry_count >= MAX_RETRIES, and all steps done, should return "escalation"
     state: AgentState = {
         "errors": ["Step failed"],
         "retry_count": 2, # MAX_RETRIES is 2
@@ -52,7 +52,7 @@ def test_single_route_after_validation_terminal_failure():
         "budget": BudgetTracker(max_cost_usd=1.0, consumed_cost=0.0),
     }
     result = _route_after_validation(state)
-    assert result == "judge_or_finalizer"
+    assert result == "escalation"
 
 
 def test_default_tool_registration():

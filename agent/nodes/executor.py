@@ -151,6 +151,8 @@ async def execute_step(state: AgentState) -> dict:
         )),
     ]
 
+    budget = state.get("budget")
+
     try:
         langchain_tools = registry.get_langchain_tools()
         if langchain_tools:

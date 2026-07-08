@@ -14,6 +14,8 @@ available output with status=degraded_completion.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -22,6 +24,10 @@ from core.audit import get_audit_trail
 from core.budget import BudgetBand
 from core.node_events import emit_event
 from core.projections import project_state
+
+log = logging.getLogger(__name__)
+
+_GRAPH_TIMEOUT = 300  # hard timeout per graph invocation (seconds)
 
 
 async def run_task_with_degradation(
@@ -56,7 +62,25 @@ async def run_task_with_degradation(
     visited_topologies: set[str] = {topology}  # Track to detect projection cycles
 
     while degradation_count < max_degradations:
-        result = await current_graph.ainvoke(None, config)
+        try:
+            result = await asyncio.wait_for(
+                current_graph.ainvoke(None, config),
+                timeout=_GRAPH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            log.error("Graph timed out after %ds on topology %s", _GRAPH_TIMEOUT, current_topology)
+            return _build_result(
+                {"status": "failed", "final_output": None, "logs": [f"Graph timed out on {current_topology}"]},
+                current_topology,
+                degradation_count,
+            )
+        except Exception as e:
+            log.error("Graph failed on topology %s: %s", current_topology, e)
+            return _build_result(
+                {"status": "failed", "final_output": None, "logs": [f"Graph failed on {current_topology}: {e}"]},
+                current_topology,
+                degradation_count,
+            )
 
         # Check for interrupt
         if "__interrupt__" not in result:

@@ -41,6 +41,9 @@ form.addEventListener("submit", async (e) => {
       body: JSON.stringify(body),
     });
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || `HTTP ${res.status}`);
+    }
     const taskId = data.task_id;
 
     connectWebSocket(taskId);
@@ -140,11 +143,13 @@ function appendEvent(event) {
 
 function formatEvent(event) {
   const d = event.data || {};
-  const fmtTokens = (n) => n ? `${n.toLocaleString()} tokens` : "";
-  const fmtCost = (c) => c ? `$${c.toFixed(4)}` : "";
-  const fmtBudget = (p) => p !== undefined ? `${p}% budget` : "";
+  const fmtTokens = (n) => n != null ? `${n.toLocaleString()} tokens` : "";
+  const fmtCost = (c) => c != null ? `$${c.toFixed(4)}` : "";
+  const fmtBudget = (p) => p != null ? `${p}% budget` : "";
 
   switch (event.event_type) {
+    case "ping":
+      return ``;
     case "topology_selected":
       return `→ ${d.topology} (${d.rationale || ""})`;
 

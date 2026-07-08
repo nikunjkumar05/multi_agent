@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import re
 from typing import Any
 
@@ -8,6 +10,10 @@ from agent.nodes.executor import _extract_text
 from agent.state import AgentState, PlanStep
 from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
+
+log = logging.getLogger(__name__)
+
+PLANNER_TIMEOUT = 60
 
 TRIVIAL_KEYWORDS = {
     "hi", "hello", "hey", "thanks", "thank you", "bye", "goodbye",
@@ -88,40 +94,52 @@ async def plan_task(state: AgentState) -> dict:
 
     tier = state["decision"].model_tiers.get("planner", "standard")
     llm = create_llm(tier)
-    response = await llm.ainvoke([
-        SystemMessage(content=PLANNER_SYSTEM),
-        HumanMessage(content=(
-            f"Task: {state['task']}\n\n"
-            f"Produce exactly {step_count} step(s)."
-        )),
-    ])
 
-    budget = state.get("budget")
-    if budget:
-        budget.record_usage(
-            tokens=estimate_tokens(response),
-            cost=estimate_cost(response, tier),
+    try:
+        response = await asyncio.wait_for(
+            llm.ainvoke([
+                SystemMessage(content=PLANNER_SYSTEM),
+                HumanMessage(content=(
+                    f"Task: {state['task']}\n\n"
+                    f"Produce exactly {step_count} step(s)."
+                )),
+            ]),
+            timeout=PLANNER_TIMEOUT,
         )
 
-    content = _extract_text(response.content)
-    cleaned_content = _strip_code_fences(content)
-    try:
-        steps_raw = json.loads(cleaned_content)
-    except json.JSONDecodeError:
-        lines = cleaned_content.strip().split("\n")
-        steps_raw = []
-        for i, line in enumerate(lines, 1):
-            cleaned = re.sub(r"^\d+[\.\)\:\-]\s*", "", line.strip())
-            if cleaned:
-                steps_raw.append({"step_id": i, "description": cleaned})
+        budget = state.get("budget")
+        if budget:
+            try:
+                budget.record_usage(
+                    tokens=estimate_tokens(response),
+                    cost=estimate_cost(response, tier),
+                )
+            except Exception:
+                pass
 
-    steps_raw = steps_raw[:step_count]
+        content = _extract_text(response.content)
+        cleaned_content = _strip_code_fences(content)
+        try:
+            steps_raw = json.loads(cleaned_content)
+        except json.JSONDecodeError:
+            lines = cleaned_content.strip().split("\n")
+            steps_raw = []
+            for i, line in enumerate(lines, 1):
+                cleaned = re.sub(r"^\d+[\.\)\:\-]\s*", "", line.strip())
+                if cleaned:
+                    steps_raw.append({"step_id": i, "description": cleaned})
 
-    while len(steps_raw) < step_count:
-        steps_raw.append({
-            "step_id": len(steps_raw) + 1,
-            "description": f"Continue and complete the task (part {len(steps_raw) + 1})",
-        })
+        steps_raw = steps_raw[:step_count]
+
+        while len(steps_raw) < step_count:
+            steps_raw.append({
+                "step_id": len(steps_raw) + 1,
+                "description": f"Continue and complete the task (part {len(steps_raw) + 1})",
+            })
+
+    except Exception as e:
+        log.warning("Planner LLM failed: %s — using single-step fallback", e)
+        steps_raw = [{"step_id": 1, "description": state["task"]}]
 
     steps: list[PlanStep] = [
         PlanStep(

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -33,7 +34,11 @@ async def websocket_endpoint(ws: WebSocket, task_id: str) -> None:
         while True:
             await asyncio.sleep(_HEARTBEAT_INTERVAL)
             try:
-                await ws.send_json({"event_type": "ping"})
+                await ws.send_json({
+                    "event_type": "ping",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "data": {},
+                })
             except Exception:
                 break
 

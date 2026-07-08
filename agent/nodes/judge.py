@@ -36,7 +36,7 @@ async def ensemble_judge(state: AgentState) -> dict:
             last_result = step_results.get(last_step_id, "")
         executor_outputs_str = f"Executor output:\n{last_result}"
 
-    validator_conf = state.get("validator_confidence", 1.0)
+    validator_conf = state.get("validator_confidence") or 1.0
     diverged = state.get("reasoning_diverged", False)
 
     tier = state["decision"].model_tiers.get("judge", "frontier")

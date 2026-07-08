@@ -19,12 +19,23 @@ from core.audit import get_audit_trail
 from core.budget import BudgetBand, BudgetTracker
 from core.node_events import emit_event
 
+TOPOLOGY_DEGRADATION_CHAIN = ["ensemble", "fanout", "supervisor", "pipeline", "single"]
+
 
 class BudgetGateAction(str, Enum):
     CONTINUE = "continue"
     PAUSE = "pause"
     SKIP_JUDGE = "skip_judge"
     EMERGENCY_SINGLE = "emergency_single"
+
+
+def _next_topology(current: str) -> str:
+    """Get the next topology in the degradation chain."""
+    try:
+        idx = TOPOLOGY_DEGRADATION_CHAIN.index(current)
+        return TOPOLOGY_DEGRADATION_CHAIN[min(idx + 1, len(TOPOLOGY_DEGRADATION_CHAIN) - 1)]
+    except ValueError:
+        return "single"
 
 
 def evaluate_gate(state: dict) -> BudgetGateAction:
@@ -68,18 +79,20 @@ async def budget_gate_node(state: dict) -> dict:
         return {}
 
     task_id = state.get("task_id", "")
-    topology = state.get("topology", "unknown")
+    topology = state.get("topology", "single")
     budget: BudgetTracker | None = state.get("budget")
     band = budget.get_band().value if budget else "unknown"
 
     if action == BudgetGateAction.PAUSE:
+        to_topology = _next_topology(topology)
         await emit_event(
             task_id,
             "budget_gate_pause",
             {
                 "band": band,
-                "topology": topology,
-                "message": f"Budget gate: {band} on {topology} → interrupt for degradation",
+                "from_topology": topology,
+                "to_topology": to_topology,
+                "message": f"Budget gate: {band} on {topology} → interrupt for degradation to {to_topology}",
             },
         )
         audit = get_audit_trail()
@@ -87,9 +100,14 @@ async def budget_gate_node(state: dict) -> dict:
             task_id=task_id,
             band=band,
             remaining_budget=budget.remaining_pct if budget else 0,
-            action=f"Budget gate PAUSE: interrupting {topology} for degradation",
+            action=f"Budget gate PAUSE: interrupting {topology} for degradation to {to_topology}",
         )
-        interrupt({"reason": "pause", "band": band, "topology": topology})
+        interrupt({
+            "reason": "pause",
+            "band": band,
+            "from_topology": topology,
+            "to_topology": to_topology,
+        })
         return {}  # unreachable — interrupt() raises, but clarifies intent
 
     elif action == BudgetGateAction.EMERGENCY_SINGLE:
@@ -98,7 +116,8 @@ async def budget_gate_node(state: dict) -> dict:
             "budget_gate_emergency",
             {
                 "band": band,
-                "topology": topology,
+                "from_topology": topology,
+                "to_topology": "single",
                 "message": f"Budget gate: {band} on {topology} → emergency collapse to single",
             },
         )
@@ -109,7 +128,12 @@ async def budget_gate_node(state: dict) -> dict:
             remaining_budget=budget.remaining_pct if budget else 0,
             action=f"Budget gate EMERGENCY: collapsing {topology} to single",
         )
-        interrupt({"reason": "emergency_single", "band": band, "topology": topology})
+        interrupt({
+            "reason": "emergency_single",
+            "band": band,
+            "from_topology": topology,
+            "to_topology": "single",
+        })
         return {}  # unreachable — interrupt() raises, but clarifies intent
 
     elif action == BudgetGateAction.SKIP_JUDGE:

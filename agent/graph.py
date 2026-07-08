@@ -50,13 +50,43 @@ async def run_task(
         "decision": decision,
         "budget": budget,
         "last_budget_band": BudgetBand.HEALTHY.value,
+        # Execution plan
+        "plan_steps": [],
+        "completed_step_ids": [],
+        "current_step_index": 0,
         "step_results": {},
-        "final_result": None,
+        "candidate_outputs": {},
+        "prior_context": None,
+        # Final result
+        "final_output": None,
         "judge_output": None,
+        # Budget & degradation
+        "degradation_requested": False,
+        "target_topology": None,
+        "topology_history": [],
+        # Escalation
+        "validator_confidence": None,
+        "reasoning_diverged": False,
+        "skip_judge": False,
+        "escalation_triggered": False,
+        # Resume
+        "resume_signal": None,
+        # Fanout / ensemble / supervisor specific
+        "_worker_assignments": None,
+        "fanout_worker_results": None,
+        "agent_a_result": None,
+        "agent_b_result": None,
+        "agent_c_result": None,
+        "supervisor_remaining_tasks": None,
+        "supervisor_completed_tasks": None,
+        # Error & logs
         "errors": [],
         "retry_count": 0,
         "logs": [f"Topology: {degraded_topology}", f"Decision: {decision.rationale}"],
         "status": "pending",
+        # Backward compatibility — topologies still use `steps` and `final_result`
+        "steps": [],
+        "final_result": None,
     }
 
     config = {"configurable": {"thread_id": task_id}}
@@ -71,7 +101,7 @@ async def run_task(
             "topology": degraded_topology,
             "status": result.get("status", "unknown"),
             "budget_spent_pct": budget.spent_pct,
-            "final_result_preview": str(result.get("final_result", ""))[:200],
+            "final_result_preview": str(result.get("final_output") or result.get("final_result", ""))[:200],
         },
     )
 
@@ -80,7 +110,7 @@ async def run_task(
         "task_completed",
         {
             "status": result.get("status", "failed"),
-            "final_result": str(result.get("final_result", ""))[:500],
+            "final_result": str(result.get("final_output") or result.get("final_result", ""))[:500],
             "budget_spent_pct": budget.spent_pct,
             "topology": degraded_topology,
         },
@@ -103,10 +133,13 @@ async def run_task(
                 llm_topology=decision.llm_topology,
             )
 
+    # Read final_output (canonical) with fallback to final_result (backward compat)
+    final_output = result.get("final_output") or result.get("final_result")
+
     return {
         "task_id": task_id,
         "status": result.get("status", "failed"),
-        "final_result": result.get("final_result"),
+        "final_result": final_output,
         "judge_output": result.get("judge_output"),
         "budget_spent_pct": budget.spent_pct,
         "topology": degraded_topology,

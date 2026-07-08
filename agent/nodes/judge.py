@@ -70,7 +70,8 @@ async def ensemble_judge(state: AgentState) -> dict:
 
     return {
         "judge_output": judge_output,
-        "final_result": judge_output,
+        "final_output": judge_output,
+        "final_result": judge_output,  # backward compat
         "status": "completed",
         "logs": ["Judge produced final result"],
     }

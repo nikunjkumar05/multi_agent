@@ -134,6 +134,11 @@ async def execute_step(state: AgentState) -> dict:
         last_error = state.get("errors", ["Unknown error"])[-1] if state.get("errors") else "Unknown error"
         retry_block = f"\n\nNOTE: Previous attempt failed with error: {last_error}\nTry a different approach."
 
+    prior_context = state.get("prior_context")
+    prior_block = ""
+    if prior_context:
+        prior_block = f"\n\nPrior context from previous topology:\n{prior_context}"
+
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=(
@@ -141,6 +146,7 @@ async def execute_step(state: AgentState) -> dict:
             f"Task: {state['task']}"
             f"{context_block}"
             f"{retry_block}"
+            f"{prior_block}"
         )),
     ]
 

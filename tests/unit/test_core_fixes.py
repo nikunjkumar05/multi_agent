@@ -30,28 +30,29 @@ def test_estimate_tokens_dict_aware():
 
 
 def test_pipeline_should_continue_terminal_failure():
-    # If there are errors and retry_count >= MAX_RETRIES, should return "end"
+    # If there are errors and retry_count >= MAX_RETRIES, and all steps done, should return "judge"
     state: AgentState = {
         "errors": ["Step failed"],
         "retry_count": 2, # MAX_RETRIES is 2
         "current_step_index": 0,
         "steps": [{"step_id": 1, "description": "Step 1", "status": "failed", "result": None, "error": "error"}],
+        "step_results": {1: "some result"},  # step completed
     }
-    assert _should_continue(state) == "end"
+    assert _should_continue(state) == "judge"
 
 
-@pytest.mark.anyio
-async def test_single_route_after_validation_terminal_failure():
-    # If there are errors and retry_count >= MAX_RETRIES, should return "finalizer"
+def test_single_route_after_validation_terminal_failure():
+    # If there are errors and retry_count >= MAX_RETRIES, and all steps done, should return "judge_or_finalizer"
     state: AgentState = {
         "errors": ["Step failed"],
         "retry_count": 2, # MAX_RETRIES is 2
         "current_step_index": 0,
         "steps": [{"step_id": 1, "description": "Step 1", "status": "failed", "result": None, "error": "error"}],
+        "step_results": {1: "some result"},  # step completed
         "budget": BudgetTracker(max_cost_usd=1.0, consumed_cost=0.0),
     }
-    result = await _route_after_validation(state)
-    assert result == "finalizer"
+    result = _route_after_validation(state)
+    assert result == "judge_or_finalizer"
 
 
 def test_default_tool_registration():

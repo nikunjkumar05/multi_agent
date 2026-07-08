@@ -3,6 +3,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
+from agent.nodes.budget_gate import budget_gate_node
 from agent.nodes.executor import execute_step
 from agent.nodes.finalizer import finalize_result
 from agent.nodes.judge import ensemble_judge
@@ -78,6 +79,7 @@ def build_supervisor_graph() -> StateGraph:
     builder.add_node("planner", plan_task)
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("executor", execute_step)
+    builder.add_node("budget_gate", budget_gate_node)
     builder.add_node("validator", validate_result)
     builder.add_node("judge", ensemble_judge)
     builder.add_node("finalizer", finalize_result)
@@ -89,7 +91,8 @@ def build_supervisor_graph() -> StateGraph:
         _route_after_supervisor,
         {"executor": "executor", "judge": "judge"},
     )
-    builder.add_edge("executor", "validator")
+    builder.add_edge("executor", "budget_gate")
+    builder.add_edge("budget_gate", "validator")
     builder.add_edge("validator", "supervisor")
     builder.add_edge("judge", "finalizer")
     builder.add_edge("finalizer", END)

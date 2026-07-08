@@ -14,7 +14,8 @@ def finalize_result(state: AgentState) -> dict:
     if not step_results:
         return {
             "status": "failed" if errors else "completed",
-            "final_result": state.get("final_result") or "",
+            "final_output": state.get("final_output") or state.get("final_result") or "",
+            "final_result": state.get("final_output") or state.get("final_result") or "",
         }
 
     results_list = list(step_results.values())
@@ -33,5 +34,6 @@ def finalize_result(state: AgentState) -> dict:
 
     return {
         "status": "failed" if errors else "completed",
-        "final_result": combined,
+        "final_output": combined,
+        "final_result": combined,  # backward compat
     }

@@ -11,16 +11,11 @@ across agent/graph.py, centralising all post-task learning in one place.
 
 from __future__ import annotations
 
-from core.config import settings
 from core.rl_policy import RLPolicy
 from core.stats import TaskOutcome, stats
 
-# Simple keyword-based task-type detector — mirrors the feature extraction in rl_policy.py
-_CODE_KW = {"function", "implement", "code", "class", "script", "write", "create", "build", "develop", "program"}
-_RESEARCH_KW = {"explain", "research", "compare", "why", "how does", "describe", "summarize", "review",
-                "way to", "how to", "what are", "is there", "options for", "alternatives"}
-_DATA_KW = {"analyze", "data", "parallel", "bulk", "process", "dataset", "statistics", "chart", "graph"}
-_VERIFY_KW = {"verify", "audit", "validate", "critical", "security", "proof", "check", "review code"}
+# Import the canonical detect_task_type from executor (single source of truth)
+from agent.nodes.executor import detect_task_type
 
 # Topology-task type compatibility: which topology is "correct" for each task type
 TOPOLOGY_TASK_MAP = {
@@ -28,25 +23,10 @@ TOPOLOGY_TASK_MAP = {
     "research": "supervisor",
     "data": "fanout",
     "verify": "ensemble",
+    "math": "pipeline",
+    "creative": "single",
     "general": "single",
 }
-
-
-def detect_task_type(task: str) -> str:
-    """
-    Classify a plain-English task string into one of five task types.
-    Returns the first matching type; falls back to "general".
-    """
-    lower = task.lower()
-    if any(kw in lower for kw in _VERIFY_KW):
-        return "verify"
-    if any(kw in lower for kw in _CODE_KW):
-        return "code"
-    if any(kw in lower for kw in _RESEARCH_KW):
-        return "research"
-    if any(kw in lower for kw in _DATA_KW):
-        return "data"
-    return "general"
 
 
 def compute_topology_reward_multiplier(task_type: str, topology: str) -> float:
@@ -91,26 +71,27 @@ async def record_task_result(
         llm_topology:  The topology the LLM originally selected (if RL overrode it).
     """
     cost_efficiency = max(0.0, 1.0 - (cost_usd / budget_total)) if budget_total > 0 else 0.0
-    reward = quality_score * settings.rl_quality_weight + cost_efficiency * settings.rl_cost_efficiency_weight
 
     # Detect task type
     task_type = detect_task_type(task)
 
-    # Apply RL override penalty FIRST (before topology multiplier)
-    # If RL overrode the LLM and chose wrong topology, penalize heavily
+    # Start with raw quality score — rl_policy.reward() will combine with cost_efficiency
+    adjusted_quality = quality_score
+
+    # Apply RL override penalty: if RL overrode the LLM and chose wrong topology, penalize
     if llm_topology and llm_topology != topology:
         expected = TOPOLOGY_TASK_MAP.get(task_type)
         if expected and topology != expected:
-            reward *= 0.5  # 50% penalty for wrong RL override
+            adjusted_quality *= 0.5  # 50% penalty for wrong RL override
 
     # Apply topology-task type compatibility multiplier
     topo_multiplier = compute_topology_reward_multiplier(task_type, topology)
-    adjusted_reward = reward * topo_multiplier
+    adjusted_quality *= topo_multiplier
 
-    # Update RL policy with adjusted reward
+    # Update RL policy — pass adjusted quality (cost_efficiency is combined inside reward())
     await rl_policy.reward(
         topology=topology,
-        quality=adjusted_reward,
+        quality=adjusted_quality,
         cost_efficiency=cost_efficiency,
     )
 

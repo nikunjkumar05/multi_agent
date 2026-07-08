@@ -1,11 +1,12 @@
 """RL Policy monitoring and management endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from api.middleware.auth import require_auth
 from core.redis_client import get_redis
 from core.rl_policy import RLPolicy
 
-router = APIRouter(prefix="/rl", tags=["rl"])
+router = APIRouter(prefix="/rl", tags=["rl"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/stats")

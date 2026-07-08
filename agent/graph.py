@@ -1,8 +1,9 @@
 import uuid
 from typing import Any
 
+from agent.orchestrator import run_task_with_degradation
 from agent.state import AgentState
-from agent.topologies.builder import compile_graph
+from agent.topologies.builder import compile_graph, checkpointer
 from core.audit import get_audit_trail
 from core.budget import BudgetBand, BudgetTracker
 from core.degrader import degrade_topology
@@ -89,19 +90,28 @@ async def run_task(
         "final_result": None,
     }
 
-    config = {"configurable": {"thread_id": task_id}}
+    # Run with mid-execution degradation support
+    result = await run_task_with_degradation(
+        graph=graph,
+        initial_state=initial_state,
+        task_id=task_id,
+        topology=degraded_topology,
+        checkpointer=checkpointer,
+    )
 
-    result = await graph.ainvoke(initial_state, config=config)
+    # Use final topology from orchestrator (may have degraded)
+    final_topology = result.get("topology", degraded_topology)
 
     audit = get_audit_trail()
     audit.record(
         task_id=task_id,
         event_type="task_completed",
         detail={
-            "topology": degraded_topology,
+            "topology": final_topology,
             "status": result.get("status", "unknown"),
             "budget_spent_pct": budget.spent_pct,
             "final_result_preview": str(result.get("final_output") or result.get("final_result", ""))[:200],
+            "degradation_count": result.get("degradation_count", 0),
         },
     )
 
@@ -112,7 +122,8 @@ async def run_task(
             "status": result.get("status", "failed"),
             "final_result": str(result.get("final_output") or result.get("final_result", ""))[:500],
             "budget_spent_pct": budget.spent_pct,
-            "topology": degraded_topology,
+            "topology": final_topology,
+            "degradation_count": result.get("degradation_count", 0),
         },
     )
 
@@ -121,10 +132,10 @@ async def run_task(
         if redis:
             rl = RLPolicy(redis)
             status = result.get("status", "failed")
-            quality = 1.0 if status == "completed" else 0.0
+            quality = 1.0 if status in ("completed", "degraded_completion") else 0.0
             await record_task_result(
                 rl_policy=rl,
-                topology=degraded_topology,
+                topology=final_topology,
                 budget_band=budget.get_band().value,
                 task=task,
                 quality_score=quality,
@@ -142,6 +153,7 @@ async def run_task(
         "final_result": final_output,
         "judge_output": result.get("judge_output"),
         "budget_spent_pct": budget.spent_pct,
-        "topology": degraded_topology,
+        "topology": final_topology,
+        "degradation_count": result.get("degradation_count", 0),
         "logs": result.get("logs", []),
     }

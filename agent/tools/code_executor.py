@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -38,19 +39,19 @@ class CodeExecutor(BaseTool):
         if not code:
             return ToolResult(success=False, output=None, error="No code provided.")
         
-        try :
+        tmp_path = None
+        try:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
                 f.write(code)
                 tmp_path = f.name
             
             result = subprocess.run(
-                ["python", tmp_path] + (args or []),
+                [sys.executable, tmp_path] + (args or []),
                 capture_output=True,
                 text=True,
                 timeout=10,
                 stdin=subprocess.DEVNULL,
             )
-            Path(tmp_path).unlink(missing_ok=True)  # Clean up the temporary file
 
             if result.returncode != 0:
                 return ToolResult(success=False, output=result.stdout, error=result.stderr)
@@ -71,3 +72,6 @@ class CodeExecutor(BaseTool):
             return ToolResult(success=False, output=None, error="Execution timed out (10s)")
         except Exception as e:
             return ToolResult(success=False, output=None, error=str(e))
+        finally:
+            if tmp_path:
+                Path(tmp_path).unlink(missing_ok=True)

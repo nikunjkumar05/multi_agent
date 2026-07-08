@@ -4,6 +4,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.nodes.executor import _extract_text
 from agent.state import AgentState, PlanStep
 from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
@@ -102,7 +103,7 @@ async def plan_task(state: AgentState) -> dict:
             cost=estimate_cost(response, tier),
         )
 
-    content = response.content if isinstance(response.content, str) else str(response.content)
+    content = _extract_text(response.content)
     cleaned_content = _strip_code_fences(content)
     try:
         steps_raw = json.loads(cleaned_content)

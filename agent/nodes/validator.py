@@ -2,6 +2,7 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.nodes.executor import _extract_text
 from agent.state import AgentState
 from agent.nodes.executor import detect_task_type
 from core.llm import create_llm, estimate_cost, estimate_tokens
@@ -87,7 +88,7 @@ async def validate_result(state: AgentState) -> dict:
             cost=estimate_cost(response, tier),
         )
 
-    content = response.content if isinstance(response.content, str) else str(response.content)
+    content = _extract_text(response.content)
 
     try:
         parsed = json.loads(content)

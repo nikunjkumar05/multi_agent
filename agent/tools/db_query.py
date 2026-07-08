@@ -1,3 +1,4 @@
+import re
 import sqlite3
 from typing import Any
 
@@ -39,7 +40,7 @@ class DBQueryTool(BaseTool):
 
         upper = query.upper()
         for kw in BLOCKED_KEYWORDS:
-            if kw in upper:
+            if re.search(r'\b' + kw + r'\b', upper):
                 return ToolResult(
                     success=False,
                     output=None,
@@ -47,11 +48,11 @@ class DBQueryTool(BaseTool):
                 )
 
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(query)
-            rows = [dict(row) for row in cursor.fetchall()]
-            conn.close()
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA query_only = ON")
+                cursor = conn.execute(query)
+                rows = [dict(row) for row in cursor.fetchall()]
             return ToolResult(
                 success=True,
                 output=rows,

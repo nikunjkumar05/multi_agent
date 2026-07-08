@@ -66,7 +66,9 @@ async def supervisor_node(state: AgentState) -> dict:
     return {"current_step_index": target_idx, "status": "executing"}
 
 
-def _route_after_supervisor(state: AgentState) -> Literal["executor", "judge"]:
+def _route_after_supervisor(state: AgentState) -> Literal["executor", "judge", "finalizer"]:
+    if state.get("skip_judge"):
+        return "finalizer"
     steps = state.get("steps", [])
     pending = [s for s in steps if s["status"] == "pending"]
     if not pending:
@@ -89,7 +91,7 @@ def build_supervisor_graph() -> StateGraph:
     builder.add_conditional_edges(
         "supervisor",
         _route_after_supervisor,
-        {"executor": "executor", "judge": "judge"},
+        {"executor": "executor", "judge": "judge", "finalizer": "finalizer"},
     )
     builder.add_edge("executor", "budget_gate")
     builder.add_edge("budget_gate", "validator")

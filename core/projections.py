@@ -186,8 +186,9 @@ def project_state(state: dict[str, Any], from_topology: str, to_topology: str) -
 
     projected = proj_fn(state)
 
-    # Add topology_history entry
-    projected["topology_history"] = [
+    # Append to topology_history (preserve existing history from prior degradations)
+    existing_history = state.get("topology_history", [])
+    projected["topology_history"] = existing_history + [
         {"from": from_topology, "to": to_topology}
     ]
 

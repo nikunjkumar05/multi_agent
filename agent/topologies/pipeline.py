@@ -24,6 +24,8 @@ def _should_continue(state: AgentState) -> str:
         if completed < len(steps):
             return "executor"
 
+    if state.get("skip_judge"):
+        return "finalizer"
     return "judge"
 
 
@@ -47,6 +49,7 @@ def build_pipeline_graph() -> StateGraph:
         {
             "executor": "executor",
             "judge": "judge",
+            "finalizer": "finalizer",
         },
     )
     builder.add_edge("judge", "finalizer")

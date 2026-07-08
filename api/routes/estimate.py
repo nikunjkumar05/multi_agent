@@ -21,15 +21,16 @@ Each agent role's token cost is priced at its assigned model tier
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from api.middleware.auth import require_auth
 from api.models.schemas import ExecuteRequest
 from core.budget import BudgetTracker
 from core.config import settings
 from core.optimizer import CostTierOptimizer
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 # Rough token estimates (in thousands) per role per topology
 _TOPOLOGY_TOKEN_PROFILE: dict[str, dict[str, float]] = {

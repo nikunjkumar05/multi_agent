@@ -14,9 +14,13 @@ from api.routes import audit, estimate, execute, rl, tasks
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: initialise persistent resources on startup."""
+    import logging
     from core.audit import audit_trail
+    from core.config import settings
     from core.redis_client import get_redis
     from core.rl_policy import RLPolicy
+
+    logger = logging.getLogger("bamas")
 
     await audit_trail.init_db()
 
@@ -25,6 +29,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if redis:
         rl = RLPolicy(redis)
         await rl._ensure_db()
+
+    # Security warning for default JWT secret
+    if settings.jwt_secret == "change-me-in-production":
+        logger.warning(
+            "SECURITY: jwt_secret is set to the default value. "
+            "Authentication is effectively disabled. "
+            "Set JWT_SECRET environment variable for production."
+        )
 
     yield
     # Shutdown hooks can be added here if needed

@@ -1,5 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.nodes.executor import _extract_text
 from agent.state import AgentState
 from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
@@ -18,11 +19,11 @@ Return the BEST final result as plain text. Be concise and accurate."""
 async def ensemble_judge(state: AgentState) -> dict:
     step_results = state.get("step_results", {})
 
-    # Extract parallel agent outputs (e.g. agent_a, agent_b, agent_c) if they exist
+    # Extract parallel agent outputs (e.g. "a", "b", "c" from ensemble, or "agent_*" keys)
     agent_outputs = []
     for k, v in step_results.items():
-        if isinstance(k, str) and k.startswith("agent_"):
-            agent_name = k.replace("agent_", "Agent ").upper()
+        if isinstance(k, str) and (k.startswith("agent_") or len(k) == 1):
+            agent_name = f"Agent {k.upper()}" if len(k) == 1 else k.replace("agent_", "Agent ").upper()
             agent_outputs.append(f"{agent_name} output:\n{v}")
 
     if agent_outputs:
@@ -61,7 +62,7 @@ async def ensemble_judge(state: AgentState) -> dict:
             cost=estimate_cost(response, tier),
         )
 
-    judge_output = response.content if isinstance(response.content, str) else str(response.content)
+    judge_output = _extract_text(response.content)
 
     task_id = state.get("task_id", "")
     await emit_event(task_id, "judge_completed", {

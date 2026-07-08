@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from api.middleware.auth import require_auth
 from api.models.schemas import AuditResponse
 from core.audit import get_audit_trail
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @router.get("/audit/{task_id}", response_model=AuditResponse)

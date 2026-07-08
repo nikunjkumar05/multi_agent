@@ -120,16 +120,17 @@ class CostTierOptimizer:
 
         # 3. RL refinement: override when trained enough
         redis = await get_redis()
-        rl = RLPolicy(redis)
-        rl_topology = await rl.select_topology(task, budget.get_band().value)
+        rl = RLPolicy(redis) if redis else None
+        rl_topology = None
+        if rl:
+            rl_topology = await rl.select_topology(task, budget.get_band().value)
 
         from core.config import settings
-        from core.learning import detect_task_type
+        from agent.nodes.executor import detect_task_type
 
-        rule_topo = rule_based_select_topology(task)
         llm_topology = llm_decision.topology
         
-        if rl_topology and rl.total_tasks >= settings.rl_min_tasks_for_override:
+        if rl_topology and rl and rl.total_tasks >= settings.rl_min_tasks_for_override:
             chosen = rl_topology
             rationale = f"RL policy selected {rl_topology} (trained on {rl.total_tasks} tasks)"
             confidence = rl._compute_confidence(rl_topology)
@@ -147,10 +148,14 @@ class CostTierOptimizer:
             rationale = llm_decision.rationale
 
         # 4. Use LLM's model tiers (with RL topology override)
+        # Ensure all required keys are present with defaults
+        default_tiers = {"planner": "standard", "executor": "standard", "validator": "cheap", "judge": "standard"}
+        model_tiers = {**default_tiers, **(llm_decision.model_tiers or {})}
+
         decision = OptimizerDecision(
             topology=chosen,
             llm_topology=llm_topology if chosen != llm_topology else None,
-            model_tiers=llm_decision.model_tiers,
+            model_tiers=model_tiers,
             rationale=rationale,
             alternatives_considered=llm_decision.alternatives_considered,
         )

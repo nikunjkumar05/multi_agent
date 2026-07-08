@@ -1,11 +1,11 @@
-from typing import Literal
+from typing import Any
 
 from agent.state import AgentState
 from core.escalation import should_escalate
 from core.node_events import emit_event
 
 
-async def check_escalation(state: AgentState) -> Literal["judge", "continue"]:
+async def check_escalation(state: AgentState) -> dict[str, Any]:
     escalate = should_escalate(
         validator_confidence=state.get("validator_confidence", 1.0),
         reasoning_diverged=state.get("reasoning_diverged", False),
@@ -19,6 +19,4 @@ async def check_escalation(state: AgentState) -> Literal["judge", "continue"]:
         "escalated": escalate,
     })
 
-    if escalate:
-        return "judge"
-    return "continue"
+    return {"escalation_triggered": escalate}

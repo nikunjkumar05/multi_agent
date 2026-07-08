@@ -87,6 +87,9 @@ class RLPolicy:
 
     async def load(self) -> None:
         """Load RL state from Redis, falling back to file, then SQLite."""
+        if self.redis is None:
+            self._load_from_file()
+            return
         pipe = await self.redis.pipeline()
         for topo in TOPOLOGIES:
             pipe.hgetall(f"rl_policy:arm:{topo}")
@@ -187,14 +190,15 @@ class RLPolicy:
 
         combined = quality * settings.rl_quality_weight + cost_efficiency * settings.rl_cost_efficiency_weight
 
-        # Update Redis (fast path)
-        arm_key = f"rl_policy:arm:{topology}"
-        if combined > 0.5:
-            await self.redis.hincrbyfloat(arm_key, "alpha", combined)
-        else:
-            await self.redis.hincrbyfloat(arm_key, "beta", 1.0 - combined)
+        # Update Redis (fast path) — skip if Redis unavailable
+        if self.redis is not None:
+            arm_key = f"rl_policy:arm:{topology}"
+            if combined > 0.5:
+                await self.redis.hincrbyfloat(arm_key, "alpha", combined)
+            else:
+                await self.redis.hincrbyfloat(arm_key, "beta", 1.0 - combined)
+            await self.redis.incr("rl_policy:total_tasks")
 
-        await self.redis.incr("rl_policy:total_tasks")
         self.total_tasks += 1
 
         # Update in-memory state
@@ -296,16 +300,17 @@ class RLPolicy:
             self.arms = json.loads(row[0][0])
             self.total_tasks = row[0][1]
 
-            # Sync back to Redis
-            pipe = await self.redis.pipeline()
-            for topo in TOPOLOGIES:
-                params = self.arms.get(topo, {"alpha": 1.0, "beta": 1.0})
-                pipe.hset(f"rl_policy:arm:{topo}", mapping={
-                    "alpha": str(params["alpha"]),
-                    "beta": str(params["beta"]),
-                })
-            pipe.set("rl_policy:total_tasks", self.total_tasks)
-            await pipe.execute()
+            # Sync back to Redis (only if available)
+            if self.redis is not None:
+                pipe = await self.redis.pipeline()
+                for topo in TOPOLOGIES:
+                    params = self.arms.get(topo, {"alpha": 1.0, "beta": 1.0})
+                    pipe.hset(f"rl_policy:arm:{topo}", mapping={
+                        "alpha": str(params["alpha"]),
+                        "beta": str(params["beta"]),
+                    })
+                pipe.set("rl_policy:total_tasks", self.total_tasks)
+                await pipe.execute()
 
             # Sync back to file
             self._save_to_file()
@@ -376,6 +381,7 @@ class RLPolicy:
     async def get_stats(self) -> dict:
         """Get RL policy statistics for monitoring dashboard."""
         await self.load()
+        from core.config import settings
         stats = {}
         for topo in TOPOLOGIES:
             params = self.arms.get(topo, {"alpha": 1.0, "beta": 1.0})
@@ -386,5 +392,6 @@ class RLPolicy:
                 "expected_reward": params["alpha"] / (params["alpha"] + params["beta"]),
             }
         stats["total_tasks"] = self.total_tasks
-        stats["min_tasks_for_override"] = RL_MIN_CONFIDENCE_FOR_OVERRIDE
+        stats["min_tasks_for_override"] = settings.rl_min_tasks_for_override
+        stats["min_confidence_for_override"] = RL_MIN_CONFIDENCE_FOR_OVERRIDE
         return stats

@@ -13,9 +13,9 @@ Provider = Literal["openai", "mistral", "ollama"]
 
 TIER_MODEL_MAP: dict[Provider, dict[ModelTier, str]] = {
     "openai": {
-        "cheap": settings.tier_cheap_model,
-        "standard": settings.tier_standard_model,
-        "frontier": settings.tier_frontier_model,
+        "cheap": "gpt-4o-mini",
+        "standard": "gpt-4o",
+        "frontier": "o3",
     },
     "mistral": {
         "cheap": settings.tier_cheap_model,

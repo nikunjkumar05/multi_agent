@@ -50,7 +50,7 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
         return {
             "step_results": step_results,
             "candidate_outputs": candidate_outputs,
-            "logs": state.get("logs", []) + [f"Agent {role} completed"],
+            "logs": [f"Agent {role} completed"],
         }
 
     agent_node.__name__ = f"agent_{agent_key}"

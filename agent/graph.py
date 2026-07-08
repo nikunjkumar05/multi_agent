@@ -121,7 +121,9 @@ async def run_task(
         {
             "status": result.get("status", "failed"),
             "final_result": str(result.get("final_output") or result.get("final_result", ""))[:500],
-            "budget_spent_pct": budget.spent_pct,
+            "budget_spent_pct": round(budget.spent_pct, 1),
+            "tokens_used": budget.consumed_tokens,
+            "cost_usd": round(budget.consumed_cost, 6),
             "topology": final_topology,
             "degradation_count": result.get("degradation_count", 0),
         },

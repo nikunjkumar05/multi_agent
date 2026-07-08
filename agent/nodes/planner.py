@@ -134,7 +134,13 @@ async def plan_task(state: AgentState) -> dict:
         for s in steps_raw
     ]
 
-    await emit_event(task_id, "planner_completed", {"step_count": len(steps)})
+    budget = state.get("budget")
+    await emit_event(task_id, "planner_completed", {
+        "step_count": len(steps),
+        "tokens_used": budget.consumed_tokens if budget else 0,
+        "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
+        "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+    })
 
     return {
         "steps": steps,

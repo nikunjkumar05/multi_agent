@@ -93,6 +93,9 @@ async def budget_gate_node(state: dict) -> dict:
                 "from_topology": topology,
                 "to_topology": to_topology,
                 "message": f"Budget gate: {band} on {topology} → interrupt for degradation to {to_topology}",
+                "consumed_tokens": budget.consumed_tokens if budget else 0,
+                "consumed_cost": round(budget.consumed_cost, 6) if budget else 0,
+                "spent_pct": round(budget.spent_pct, 1) if budget else 0,
             },
         )
         audit = get_audit_trail()
@@ -119,6 +122,9 @@ async def budget_gate_node(state: dict) -> dict:
                 "from_topology": topology,
                 "to_topology": "single",
                 "message": f"Budget gate: {band} on {topology} → emergency collapse to single",
+                "consumed_tokens": budget.consumed_tokens if budget else 0,
+                "consumed_cost": round(budget.consumed_cost, 6) if budget else 0,
+                "spent_pct": round(budget.spent_pct, 1) if budget else 0,
             },
         )
         audit = get_audit_trail()
@@ -144,6 +150,9 @@ async def budget_gate_node(state: dict) -> dict:
                 "band": band,
                 "topology": topology,
                 "message": f"Budget gate: {band} on single → skipping judge",
+                "consumed_tokens": budget.consumed_tokens if budget else 0,
+                "consumed_cost": round(budget.consumed_cost, 6) if budget else 0,
+                "spent_pct": round(budget.spent_pct, 1) if budget else 0,
             },
         )
         return {"skip_judge": True}

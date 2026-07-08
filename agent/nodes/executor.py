@@ -171,6 +171,9 @@ async def execute_step(state: AgentState) -> dict:
         await emit_event(task_id, "step_completed", {
             "step_id": step["step_id"],
             "result_preview": str(output)[:200],
+            "tokens_used": budget.consumed_tokens if budget else 0,
+            "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
+            "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
         })
 
         return {

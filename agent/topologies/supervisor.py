@@ -10,7 +10,8 @@ from agent.nodes.judge import ensemble_judge
 from agent.nodes.planner import plan_task
 from agent.nodes.validator import validate_result
 from agent.state import AgentState
-from core.llm import create_llm
+from core.llm import create_llm, estimate_cost, estimate_tokens
+from core.node_events import emit_event
 
 SUPERVISOR_SYSTEM = """You are a supervisor managing worker agents.
 Given a list of planned steps, determine which step to assign next.
@@ -50,6 +51,22 @@ async def supervisor_node(state: AgentState) -> dict:
 
     response = await llm.ainvoke(messages)
     content = response.content.strip() if isinstance(response.content, str) else str(response.content).strip()
+
+    budget = state.get("budget")
+    if budget:
+        budget.record_usage(
+            tokens=estimate_tokens(response),
+            cost=estimate_cost(response, tier),
+        )
+
+    task_id = state.get("task_id", "")
+    await emit_event(task_id, "supervisor_decided", {
+        "next_step_id": content,
+        "tokens_used": budget.consumed_tokens if budget else 0,
+        "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
+        "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+    })
+
     try:
         next_id = int(content)
     except ValueError:

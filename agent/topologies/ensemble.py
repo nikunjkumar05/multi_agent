@@ -6,7 +6,8 @@ from agent.nodes.finalizer import finalize_result
 from agent.nodes.judge import ensemble_judge
 from agent.nodes.planner import plan_task
 from agent.state import AgentState
-from core.llm import create_llm
+from core.llm import create_llm, estimate_cost, estimate_tokens
+from core.node_events import emit_event
 from langgraph.graph import END, START, StateGraph
 
 ENSEMBLE_PROMPTS = [
@@ -23,6 +24,7 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
     """Create an agent node variant for the ensemble."""
     async def agent_node(state: AgentState) -> dict:
         task = state.get("task", "")
+        task_id = state.get("task_id", "")
         decision = state.get("decision")
         tier = "standard"
         if decision and hasattr(decision, "model_tiers"):
@@ -35,6 +37,21 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
         prompt = f"{system_prompt}\n\nTask: {task}"
         response = await llm.ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
+
+        budget = state.get("budget")
+        if budget:
+            budget.record_usage(
+                tokens=estimate_tokens(response),
+                cost=estimate_cost(response, tier),
+            )
+
+        await emit_event(task_id, "agent_completed", {
+            "agent_key": agent_key,
+            "role": role,
+            "tokens_used": budget.consumed_tokens if budget else 0,
+            "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
+            "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+        })
 
         step_results = dict(state.get("step_results", {}))
         step_results[agent_key] = content

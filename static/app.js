@@ -92,6 +92,7 @@ function appendEvent(event) {
   const time = new Date(event.timestamp).toLocaleTimeString();
   const typeColors = {
     topology_selected: "#00d4ff",
+    topology_degraded: "#ff6b6b",
     planner_started: "#a78bfa",
     planner_completed: "#a78bfa",
     step_started: "#34d399",
@@ -99,6 +100,11 @@ function appendEvent(event) {
     validation_completed: "#fbbf24",
     escalation_check: "#f87171",
     budget_band_crossed: "#fb923c",
+    budget_gate_pause: "#fb923c",
+    budget_gate_emergency: "#ef4444",
+    budget_gate_skip_judge: "#fbbf24",
+    agent_completed: "#34d399",
+    supervisor_decided: "#a78bfa",
     task_completed: "#22c55e",
     task_failed: "#ef4444",
     connection_closed: "#888",
@@ -109,9 +115,7 @@ function appendEvent(event) {
   };
 
   const color = typeColors[event.event_type] || "#ccc";
-  const dataStr = Object.keys(event.data || {}).length > 0
-    ? ` — ${JSON.stringify(event.data)}`
-    : "";
+  const formatted = formatEvent(event);
 
   const timeSpan = document.createElement("span");
   timeSpan.className = "event-time";
@@ -124,7 +128,7 @@ function appendEvent(event) {
 
   const dataSpan = document.createElement("span");
   dataSpan.className = "event-data";
-  dataSpan.textContent = dataStr;
+  dataSpan.textContent = formatted;
 
   el.appendChild(timeSpan);
   el.appendChild(typeSpan);
@@ -132,6 +136,105 @@ function appendEvent(event) {
 
   eventList.appendChild(el);
   eventList.scrollTop = eventList.scrollHeight;
+}
+
+function formatEvent(event) {
+  const d = event.data || {};
+  const fmtTokens = (n) => n ? `${n.toLocaleString()} tokens` : "";
+  const fmtCost = (c) => c ? `$${c.toFixed(4)}` : "";
+  const fmtBudget = (p) => p !== undefined ? `${p}% budget` : "";
+
+  switch (event.event_type) {
+    case "topology_selected":
+      return `→ ${d.topology} (${d.rationale || ""})`;
+
+    case "topology_degraded":
+      return `${d.from_topology} → ${d.to_topology} (${d.reason || "budget"})`;
+
+    case "planner_started":
+      return `Planning...`;
+
+    case "planner_completed":
+      return `Planned ${d.step_count} steps [${fmtTokens(d.tokens_used)}, ${fmtCost(d.cost_usd)}, ${fmtBudget(d.budget_spent_pct)}]`;
+
+    case "step_started":
+      return `Step ${d.step_id}: ${(d.description || "").substring(0, 60)}${d.description && d.description.length > 60 ? "..." : ""}`;
+
+    case "step_completed": {
+      let msg = `Step ${d.step_id} done`;
+      if (d.worker) msg += ` [${d.worker}]`;
+      const parts = [];
+      if (d.tokens_used) parts.push(fmtTokens(d.tokens_used));
+      if (d.cost_usd) parts.push(fmtCost(d.cost_usd));
+      if (d.budget_spent_pct !== undefined) parts.push(fmtBudget(d.budget_spent_pct));
+      if (parts.length) msg += ` (${parts.join(", ")})`;
+      if (d.result_preview) msg += ` — ${d.result_preview.substring(0, 80)}...`;
+      return msg;
+    }
+
+    case "validation_completed": {
+      const conf = Math.round((d.confidence || 0) * 100);
+      let msg = `Validation: ${conf}% confidence`;
+      if (d.diverged) msg += " (diverged)";
+      const parts = [];
+      if (d.tokens_used) parts.push(fmtTokens(d.tokens_used));
+      if (d.cost_usd) parts.push(fmtCost(d.cost_usd));
+      if (d.budget_spent_pct !== undefined) parts.push(fmtBudget(d.budget_spent_pct));
+      if (parts.length) msg += ` [${parts.join(", ")}]`;
+      return msg;
+    }
+
+    case "escalation_check":
+      return `Escalation: ${Math.round((d.confidence || 0) * 100)} confidence, escalated=${d.escalated}`;
+
+    case "budget_band_crossed":
+      return `Budget: ${d.from_band} → ${d.to_band} (${d.spent_pct}% spent)`;
+
+    case "budget_gate_pause":
+      return `Pause: ${d.from_topology} → ${d.to_topology} (${d.band}, ${d.spent_pct}% spent, ${fmtTokens(d.consumed_tokens)})`;
+
+    case "budget_gate_emergency":
+      return `Emergency: ${d.from_topology} → ${d.to_topology} (${d.band}, ${d.spent_pct}% spent, ${fmtTokens(d.consumed_tokens)})`;
+
+    case "budget_gate_skip_judge":
+      return `Skip judge on ${d.topology} (${d.band}, ${d.spent_pct}% spent)`;
+
+    case "agent_completed":
+      return `Agent ${d.agent_key} (${d.role}) done [${fmtTokens(d.tokens_used)}, ${fmtCost(d.cost_usd)}, ${fmtBudget(d.budget_spent_pct)}]`;
+
+    case "supervisor_decided":
+      return `Supervisor → step ${d.next_step_id} [${fmtTokens(d.tokens_used)}, ${fmtCost(d.cost_usd)}, ${fmtBudget(d.budget_spent_pct)}]`;
+
+    case "judge_completed":
+      return `Judge done [${fmtTokens(d.tokens_used)}, ${fmtCost(d.cost_usd)}, ${fmtBudget(d.budget_spent_pct)}]`;
+
+    case "task_completed": {
+      const parts = [];
+      if (d.tokens_used) parts.push(fmtTokens(d.tokens_used));
+      if (d.cost_usd) parts.push(fmtCost(d.cost_usd));
+      if (d.budget_spent_pct !== undefined) parts.push(fmtBudget(d.budget_spent_pct));
+      if (d.degradation_count > 0) parts.push(`${d.degradation_count} degradations`);
+      return `Complete (${d.status}, ${parts.join(", ")})`;
+    }
+
+    case "task_failed":
+      return `Failed`;
+
+    case "connection_closed":
+      return "Connection closed";
+
+    case "connection_error":
+      return "Connection error";
+
+    case "tool_call":
+      return `Tool: ${d.tool}`;
+
+    case "tool_result":
+      return `Tool ${d.tool}: ${d.success ? "ok" : "failed"}`;
+
+    default:
+      return Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ");
+  }
 }
 
 async function pollTask(taskId) {

@@ -72,6 +72,26 @@ async def ensemble_judge(state: AgentState) -> dict:
     validator_conf = state.get("validator_confidence") or 1.0
     diverged = state.get("reasoning_diverged", False)
 
+    # Check budget before making LLM call
+    budget = state.get("budget")
+    acc_cost = state.get("consumed_cost", 0.0)
+    if budget and budget.max_cost_usd > 0:
+        spent_pct = (acc_cost / budget.max_cost_usd) * 100
+        if spent_pct >= 90:
+            await emit_event(task_id, "judge_skipped", {
+                "reason": "budget_critical",
+                "spent_pct": round(spent_pct, 1),
+            })
+            return {
+                "judge_output": executor_outputs_str,
+                "final_output": executor_outputs_str,
+                "final_result": executor_outputs_str,
+                "status": "completed",
+                "consumed_tokens": 0,
+                "consumed_cost": 0.0,
+                "logs": [f"Judge skipped - budget critical ({spent_pct:.0f}% spent)"],
+            }
+
     tier = state["decision"].model_tiers.get("judge", "frontier")
     llm = create_llm(tier, temperature=0.3)
 

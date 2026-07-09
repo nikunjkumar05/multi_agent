@@ -163,6 +163,7 @@ def build_fanout_graph() -> StateGraph:
     builder.add_node("budget_gate", budget_gate_node)
     builder.add_node("aggregator", aggregator_node)
     builder.add_node("judge", ensemble_judge)
+    builder.add_node("budget_gate_post_judge", budget_gate_node)
 
     builder.add_edge(START, "planner")
     builder.add_edge("planner", "dispatcher")
@@ -170,6 +171,7 @@ def build_fanout_graph() -> StateGraph:
     builder.add_edge("parallel_workers", "budget_gate")
     builder.add_edge("budget_gate", "aggregator")
     builder.add_edge("aggregator", "judge")
-    builder.add_edge("judge", END)
+    builder.add_edge("judge", "budget_gate_post_judge")
+    builder.add_edge("budget_gate_post_judge", END)
 
     return builder

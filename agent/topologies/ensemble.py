@@ -130,6 +130,7 @@ def build_ensemble_graph() -> StateGraph:
 
     builder.add_node("budget_gate", budget_gate_node)
     builder.add_node("judge", ensemble_judge)
+    builder.add_node("budget_gate_post_judge", budget_gate_node)
     builder.add_node("finalizer", finalize_result)
 
     builder.add_edge(START, "planner")
@@ -140,7 +141,8 @@ def build_ensemble_graph() -> StateGraph:
     builder.add_edge("agent_b", "budget_gate")
     builder.add_edge("agent_c", "budget_gate")
     builder.add_edge("budget_gate", "judge")
-    builder.add_edge("judge", "finalizer")
+    builder.add_edge("judge", "budget_gate_post_judge")
+    builder.add_edge("budget_gate_post_judge", "finalizer")
     builder.add_edge("finalizer", END)
 
     return builder

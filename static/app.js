@@ -2,14 +2,24 @@ const form = document.getElementById("taskForm");
 const resultSection = document.getElementById("resultSection");
 const auditSection = document.getElementById("auditSection");
 const eventLogSection = document.getElementById("eventLogSection");
+const costSection = document.getElementById("costSection");
 const statusBadge = document.getElementById("statusBadge");
 const topologyUsed = document.getElementById("topologyUsed");
 const resultOutput = document.getElementById("resultOutput");
 const auditLog = document.getElementById("auditLog");
 const eventList = document.getElementById("eventList");
 const submitBtn = document.getElementById("submitBtn");
+const historyList = document.getElementById("historyList");
+const refreshHistoryBtn = document.getElementById("refreshHistory");
+const topologyDiagram = document.getElementById("topologyDiagram");
+const costSummary = document.getElementById("costSummary");
 
 let currentWs = null;
+let currentTaskId = null;
+let collectedEvents = [];
+let historyRefreshInterval = null;
+
+// ── Form submission ──────────────────────────────────────────────────────────
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -25,11 +35,14 @@ form.addEventListener("submit", async (e) => {
   resultSection.classList.remove("hidden");
   auditSection.classList.add("hidden");
   eventLogSection.classList.remove("hidden");
+  costSection.classList.add("hidden");
   statusBadge.textContent = "RUNNING";
   statusBadge.className = "badge running";
   topologyUsed.textContent = "";
+  topologyDiagram.classList.add("hidden");
   resultOutput.innerHTML = "Executing task...";
   eventList.innerHTML = "";
+  collectedEvents = [];
 
   const body = { task, budget_usd: budget };
   if (topology) body.topology = topology;
@@ -45,9 +58,11 @@ form.addEventListener("submit", async (e) => {
       throw new Error(data.detail || `HTTP ${res.status}`);
     }
     const taskId = data.task_id;
+    currentTaskId = taskId;
 
     connectWebSocket(taskId);
     pollTask(taskId);
+    startHistoryRefresh();
   } catch (err) {
     statusBadge.textContent = "FAILED";
     statusBadge.className = "badge failed";
@@ -56,6 +71,8 @@ form.addEventListener("submit", async (e) => {
     submitBtn.textContent = "Run Task";
   }
 });
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
 
 function connectWebSocket(taskId) {
   if (currentWs) {
@@ -69,6 +86,7 @@ function connectWebSocket(taskId) {
   currentWs.onmessage = function (e) {
     const event = JSON.parse(e.data);
     appendEvent(event);
+    collectedEvents.push(event);
   };
 
   currentWs.onclose = function () {
@@ -87,6 +105,8 @@ function connectWebSocket(taskId) {
     });
   };
 }
+
+// ── Event log ────────────────────────────────────────────────────────────────
 
 function appendEvent(event) {
   const el = document.createElement("div");
@@ -139,6 +159,13 @@ function appendEvent(event) {
 
   eventList.appendChild(el);
   eventList.scrollTop = eventList.scrollHeight;
+
+  // Update topology diagram on relevant events
+  if (event.event_type === "topology_selected") {
+    renderTopology(event.data.topology);
+  } else if (event.event_type === "topology_degraded") {
+    renderTopology(event.data.to_topology, event.data.from_topology);
+  }
 }
 
 function formatEvent(event) {
@@ -242,6 +269,8 @@ function formatEvent(event) {
   }
 }
 
+// ── Task polling ─────────────────────────────────────────────────────────────
+
 async function pollTask(taskId) {
   const maxAttempts = 180;
   for (let i = 0; i < maxAttempts; i++) {
@@ -261,8 +290,11 @@ async function pollTask(taskId) {
         const raw = task.final_result || "No result produced";
         resultOutput.innerHTML = DOMPurify.sanitize(marked.parse(raw));
         loadAudit(taskId);
+        renderCostSummary(collectedEvents);
         submitBtn.disabled = false;
         submitBtn.textContent = "Run Task";
+        stopHistoryRefresh();
+        loadHistory();
         if (currentWs) currentWs.close();
         return;
       }
@@ -274,6 +306,8 @@ async function pollTask(taskId) {
         resultOutput.textContent = logs[logs.length - 1] || "Unknown error";
         submitBtn.disabled = false;
         submitBtn.textContent = "Run Task";
+        stopHistoryRefresh();
+        loadHistory();
         if (currentWs) currentWs.close();
         return;
       }
@@ -289,8 +323,11 @@ async function pollTask(taskId) {
   resultOutput.textContent = "Task timed out after 3 minutes";
   submitBtn.disabled = false;
   submitBtn.textContent = "Run Task";
+  stopHistoryRefresh();
   if (currentWs) currentWs.close();
 }
+
+// ── Audit trail ──────────────────────────────────────────────────────────────
 
 async function loadAudit(taskId) {
   try {
@@ -337,6 +374,294 @@ async function loadAudit(taskId) {
   }
 }
 
+// ── Task history ─────────────────────────────────────────────────────────────
+
+async function loadHistory() {
+  try {
+    const res = await fetch("/tasks?limit=50");
+    const tasks = await res.json();
+
+    if (tasks.length === 0) {
+      historyList.innerHTML = '<p class="muted">No tasks yet</p>';
+      return;
+    }
+
+    historyList.innerHTML = "";
+    tasks.forEach((task) => {
+      const item = document.createElement("div");
+      item.className = "history-item";
+      if (task.task_id === currentTaskId) {
+        item.classList.add("active");
+      }
+
+      const statusClass = {
+        running: "running",
+        pending: "running",
+        completed: "complete",
+        failed: "failed",
+      }[task.status] || "running";
+
+      const shortId = task.task_id.substring(0, 8);
+      const budgetPct = task.budget_spent_pct != null ? `${task.budget_spent_pct.toFixed(1)}%` : "—";
+      const topology = task.topology || "—";
+
+      item.innerHTML = `
+        <div class="history-item-header">
+          <span class="badge small ${statusClass}">${task.status}</span>
+          <span class="history-id">${shortId}</span>
+        </div>
+        <div class="history-item-details">
+          <span class="muted">${topology}</span>
+          <span class="muted">${budgetPct} budget</span>
+        </div>
+      `;
+
+      item.addEventListener("click", () => viewTask(task));
+      historyList.appendChild(item);
+    });
+  } catch {
+    historyList.innerHTML = '<p class="muted">Failed to load history</p>';
+  }
+}
+
+function viewTask(task) {
+  currentTaskId = task.task_id;
+  resultSection.classList.remove("hidden");
+  eventLogSection.classList.add("hidden");
+  costSection.classList.add("hidden");
+  auditSection.classList.add("hidden");
+
+  const statusClass = {
+    running: "running",
+    pending: "running",
+    completed: "complete",
+    failed: "failed",
+  }[task.status] || "running";
+
+  statusBadge.textContent = task.status.toUpperCase();
+  statusBadge.className = `badge ${statusClass}`;
+  topologyUsed.textContent = task.topology ? `topology: ${task.topology}` : "";
+
+  if (task.status === "completed" && task.final_result) {
+    resultOutput.innerHTML = DOMPurify.sanitize(marked.parse(task.final_result));
+    loadAudit(task.task_id);
+  } else if (task.status === "failed") {
+    const logs = task.logs || [];
+    resultOutput.textContent = logs[logs.length - 1] || "Task failed";
+  } else {
+    resultOutput.textContent = `Status: ${task.status}`;
+  }
+
+  // Highlight in history
+  document.querySelectorAll(".history-item").forEach((el) => el.classList.remove("active"));
+  const items = historyList.querySelectorAll(".history-item");
+  items.forEach((el) => {
+    if (el.querySelector(".history-id")?.textContent === task.task_id.substring(0, 8)) {
+      el.classList.add("active");
+    }
+  });
+}
+
+function startHistoryRefresh() {
+  stopHistoryRefresh();
+  historyRefreshInterval = setInterval(loadHistory, 5000);
+}
+
+function stopHistoryRefresh() {
+  if (historyRefreshInterval) {
+    clearInterval(historyRefreshInterval);
+    historyRefreshInterval = null;
+  }
+}
+
+refreshHistoryBtn.addEventListener("click", loadHistory);
+
+// ── Topology visualization ───────────────────────────────────────────────────
+
+function renderTopology(topology, degradedFrom) {
+  topologyDiagram.classList.remove("hidden");
+
+  const diagrams = {
+    single: `
+      <div class="topo-row">
+        <div class="topo-box topo-executor">Executor</div>
+      </div>
+    `,
+    pipeline: `
+      <div class="topo-row">
+        <div class="topo-box topo-planner">Planner</div>
+        <div class="topo-arrow">→</div>
+        <div class="topo-box topo-executor">Executor</div>
+        <div class="topo-arrow">→</div>
+        <div class="topo-box topo-validator">Validator</div>
+        <div class="topo-arrow">→</div>
+        <div class="topo-box topo-judge">Judge</div>
+      </div>
+    `,
+    supervisor: `
+      <div class="topo-row topo-supervisor-layout">
+        <div class="topo-box topo-supervisor">Supervisor</div>
+        <div class="topo-spokes">
+          <div class="topo-spoke">
+            <div class="topo-arrow-v">↕</div>
+            <div class="topo-box topo-worker">Worker 1</div>
+          </div>
+          <div class="topo-spoke">
+            <div class="topo-arrow-v">↕</div>
+            <div class="topo-box topo-worker">Worker 2</div>
+          </div>
+          <div class="topo-spoke">
+            <div class="topo-arrow-v">↕</div>
+            <div class="topo-box topo-worker">Worker N</div>
+          </div>
+        </div>
+      </div>
+    `,
+    fanout: `
+      <div class="topo-row topo-fanout-layout">
+        <div class="topo-box topo-fanout">Fan-out</div>
+        <div class="topo-arrow">→</div>
+        <div class="topo-parallel">
+          <div class="topo-box topo-worker">Worker 1</div>
+          <div class="topo-box topo-worker">Worker 2</div>
+          <div class="topo-box topo-worker">Worker N</div>
+        </div>
+        <div class="topo-arrow">→</div>
+        <div class="topo-box topo-aggregator">Aggregator</div>
+      </div>
+    `,
+    ensemble: `
+      <div class="topo-row topo-ensemble-layout">
+        <div class="topo-parallel">
+          <div class="topo-box topo-agent">Agent A</div>
+          <div class="topo-box topo-agent">Agent B</div>
+          <div class="topo-box topo-agent">Agent C</div>
+        </div>
+        <div class="topo-arrow">→</div>
+        <div class="topo-box topo-judge">Judge</div>
+      </div>
+    `,
+  };
+
+  let html = `<div class="topo-label">${topology}</div>`;
+  if (degradedFrom) {
+    html = `<div class="topo-label topo-degraded">${degradedFrom} → ${topology}</div>`;
+  }
+  html += diagrams[topology] || diagrams.single;
+
+  topologyDiagram.innerHTML = html;
+}
+
+// ── Cost breakdown ───────────────────────────────────────────────────────────
+
+function renderCostSummary(events) {
+  let totalTokens = 0;
+  let totalCost = 0;
+  let budgetPct = 0;
+  const steps = [];
+
+  for (const event of events) {
+    const d = event.data || {};
+
+    if (d.tokens_used) totalTokens = d.tokens_used;
+    if (d.cost_usd) totalCost = d.cost_usd;
+    if (d.budget_spent_pct !== undefined) budgetPct = d.budget_spent_pct;
+
+    if (event.event_type === "step_completed" && d.step_id) {
+      steps.push({
+        label: `Step ${d.step_id}`,
+        tokens: d.tokens_used || 0,
+        cost: d.cost_usd || 0,
+      });
+    }
+
+    if (event.event_type === "planner_completed") {
+      steps.unshift({
+        label: "Planning",
+        tokens: d.tokens_used || 0,
+        cost: d.cost_usd || 0,
+      });
+    }
+
+    if (event.event_type === "validation_completed") {
+      steps.push({
+        label: "Validation",
+        tokens: d.tokens_used || 0,
+        cost: d.cost_usd || 0,
+      });
+    }
+
+    if (event.event_type === "judge_completed") {
+      steps.push({
+        label: "Judge",
+        tokens: d.tokens_used || 0,
+        cost: d.cost_usd || 0,
+      });
+    }
+
+    if (event.event_type === "agent_completed" && d.agent_key) {
+      steps.push({
+        label: `Agent ${d.agent_key}`,
+        tokens: d.tokens_used || 0,
+        cost: d.cost_usd || 0,
+      });
+    }
+  }
+
+  if (totalTokens === 0 && totalCost === 0) {
+    costSection.classList.add("hidden");
+    return;
+  }
+
+  costSection.classList.remove("hidden");
+
+  const fmtTokens = (n) => n.toLocaleString();
+  const fmtCost = (c) => `$${c.toFixed(4)}`;
+
+  let html = `
+    <div class="cost-totals">
+      <div class="cost-stat">
+        <span class="cost-stat-value">${fmtTokens(totalTokens)}</span>
+        <span class="cost-stat-label">Total Tokens</span>
+      </div>
+      <div class="cost-stat">
+        <span class="cost-stat-value">${fmtCost(totalCost)}</span>
+        <span class="cost-stat-label">Total Cost</span>
+      </div>
+      <div class="cost-stat">
+        <span class="cost-stat-value">${budgetPct.toFixed(1)}%</span>
+        <span class="cost-stat-label">Budget Used</span>
+      </div>
+    </div>
+  `;
+
+  if (steps.length > 0) {
+    const maxCost = Math.max(...steps.map((s) => s.cost), 0.0001);
+    html += `<div class="cost-steps">`;
+    for (const step of steps) {
+      const pct = (step.cost / maxCost) * 100;
+      html += `
+        <div class="cost-step">
+          <div class="cost-step-label">${step.label}</div>
+          <div class="cost-step-bar-track">
+            <div class="cost-step-bar" style="width: ${pct}%"></div>
+          </div>
+          <div class="cost-step-values">${fmtTokens(step.tokens)} tok · ${fmtCost(step.cost)}</div>
+        </div>
+      `;
+    }
+    html += `</div>`;
+  }
+
+  costSummary.innerHTML = html;
+}
+
+// ── Utility ──────────────────────────────────────────────────────────────────
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+loadHistory();

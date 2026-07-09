@@ -9,58 +9,76 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>BAMAS</h1>
-      <p class="subtitle">Budget-Aware Multi-Agent Task Executor</p>
-    </header>
-
-    <section class="card">
-      <h2>New Task</h2>
-      <form id="taskForm">
-        <label for="task">Task Description</label>
-        <textarea id="task" rows="3" placeholder="e.g. Write a Python function to compute fibonacci numbers" required></textarea>
-
-        <div class="row">
-          <div>
-            <label for="budget">Budget (USD)</label>
-            <input id="budget" type="number" step="0.001" min="0.001" value="0.10" />
-          </div>
-          <div>
-            <label for="topology">Topology (optional)</label>
-            <select id="topology">
-              <option value="">auto</option>
-              <option value="single">single</option>
-              <option value="supervisor">supervisor</option>
-              <option value="pipeline">pipeline</option>
-              <option value="fanout">fanout</option>
-              <option value="ensemble">ensemble</option>
-            </select>
-          </div>
-        </div>
-
-        <button type="submit" id="submitBtn">Run Task</button>
-      </form>
-    </section>
-
-    <section id="resultSection" class="card hidden">
-      <h2>Result</h2>
-      <div class="status-bar">
-        <span id="statusBadge" class="badge">—</span>
-        <span id="topologyUsed" class="muted"></span>
+  <div class="app-layout">
+    <aside id="historyPanel" class="history-panel">
+      <div class="history-header">
+        <h2>Task History</h2>
+        <button id="refreshHistory" class="btn-icon" title="Refresh">↻</button>
       </div>
-      <div id="resultOutput" class="markdown-body"></div>
-    </section>
+      <div id="historyList" class="history-list">
+        <p class="muted">No tasks yet</p>
+      </div>
+    </aside>
 
-    <section id="auditSection" class="card hidden">
-      <h2>Audit Trail</h2>
-      <div id="auditLog"></div>
-    </section>
+    <main class="main-content">
+      <header>
+        <h1>BAMAS</h1>
+        <p class="subtitle">Budget-Aware Multi-Agent Task Executor</p>
+      </header>
 
-    <section id="eventLogSection" class="card hidden">
-      <h2>Live Execution Log</h2>
-      <div id="eventList" class="event-log"></div>
-    </section>
+      <section class="card">
+        <h2>New Task</h2>
+        <form id="taskForm">
+          <label for="task">Task Description</label>
+          <textarea id="task" rows="3" placeholder="e.g. Write a Python function to compute fibonacci numbers" required></textarea>
+
+          <div class="row">
+            <div>
+              <label for="budget">Budget (USD)</label>
+              <input id="budget" type="number" step="0.001" min="0.001" value="0.10" />
+            </div>
+            <div>
+              <label for="topology">Topology (optional)</label>
+              <select id="topology">
+                <option value="">auto</option>
+                <option value="single">single</option>
+                <option value="supervisor">supervisor</option>
+                <option value="pipeline">pipeline</option>
+                <option value="fanout">fanout</option>
+                <option value="ensemble">ensemble</option>
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" id="submitBtn">Run Task</button>
+        </form>
+      </section>
+
+      <section id="resultSection" class="card hidden">
+        <h2>Result</h2>
+        <div class="status-bar">
+          <span id="statusBadge" class="badge">—</span>
+          <span id="topologyUsed" class="muted"></span>
+        </div>
+        <div id="topologyDiagram" class="topology-diagram hidden"></div>
+        <div id="resultOutput" class="markdown-body"></div>
+      </section>
+
+      <section id="costSection" class="card hidden">
+        <h2>Cost Breakdown</h2>
+        <div id="costSummary" class="cost-summary"></div>
+      </section>
+
+      <section id="auditSection" class="card hidden">
+        <h2>Audit Trail</h2>
+        <div id="auditLog"></div>
+      </section>
+
+      <section id="eventLogSection" class="card hidden">
+        <h2>Live Execution Log</h2>
+        <div id="eventList" class="event-log"></div>
+      </section>
+    </main>
   </div>
 
   <script src="/static/app.js"></script>

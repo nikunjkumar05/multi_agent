@@ -38,6 +38,23 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
         if role == "domain_expert":
             tier = "frontier"
 
+        budget = state.get("budget")
+        acc_cost = state.get("consumed_cost", 0.0)
+        if budget and budget.max_cost_usd > 0:
+            spent_pct = (acc_cost / budget.max_cost_usd) * 100
+            if spent_pct >= 100:
+                await emit_event(task_id, "agent_skipped", {
+                    "agent_key": agent_key,
+                    "role": role,
+                    "reason": "budget_critical",
+                    "spent_pct": round(spent_pct, 1),
+                })
+                return {
+                    "consumed_tokens": 0,
+                    "consumed_cost": 0,
+                    "logs": [f"Agent {role} skipped - budget critical ({spent_pct:.0f}% spent)"],
+                }
+
         llm = create_llm(tier)
         prompt = f"{system_prompt}\n\nTask: {task}"
 
@@ -55,10 +72,20 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
             log.warning("Agent %s timed out after %ds", agent_key, _AGENT_TIMEOUT)
             content = f"[Agent {role} timed out after {_AGENT_TIMEOUT}s]"
             response = None
+            await emit_event(task_id, "agent_failed", {
+                "agent_key": agent_key,
+                "role": role,
+                "error": f"Timeout after {_AGENT_TIMEOUT}s",
+            })
         except Exception as e:
             log.warning("Agent %s failed: %s", agent_key, e)
             content = f"[Agent {role} failed: {e}]"
             response = None
+            await emit_event(task_id, "agent_failed", {
+                "agent_key": agent_key,
+                "role": role,
+                "error": str(e),
+            })
 
         agent_tokens = estimate_tokens(response) if response is not None else 0
         agent_cost = estimate_cost(response, tier) if response is not None else 0.0

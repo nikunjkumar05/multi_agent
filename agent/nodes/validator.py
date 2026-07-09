@@ -64,6 +64,25 @@ async def validate_result(state: AgentState) -> dict:
     step = steps[last_idx]
     result_text = step_results.get(step["step_id"], step.get("result", ""))
 
+    budget = state.get("budget")
+    acc_cost = state.get("consumed_cost", 0.0)
+    if budget and budget.max_cost_usd > 0:
+        spent_pct = (acc_cost / budget.max_cost_usd) * 100
+        if spent_pct >= 90:
+            task_id = state.get("task_id", "")
+            await emit_event(task_id, "validation_skipped", {
+                "reason": "budget_critical",
+                "spent_pct": round(spent_pct, 1),
+            })
+            return {
+                "validator_confidence": 0.5,
+                "reasoning_diverged": False,
+                "status": "validating",
+                "consumed_tokens": 0,
+                "consumed_cost": 0.0,
+                "logs": [f"Validation skipped - budget critical ({spent_pct:.0f}% spent)"],
+            }
+
     task_type = detect_task_type(state["task"])
     validator_prompt = VALIDATOR_PROMPTS.get(task_type, VALIDATOR_PROMPTS["general"])
 

@@ -153,6 +153,14 @@ async def plan_task(state: AgentState) -> dict:
     prev_cost = state.get("consumed_cost", 0.0) if state else 0.0
     acc_tokens = prev_tokens + local_tokens
     acc_cost = prev_cost + local_cost
+
+    # Calculate per-step budget caps (accumulated cost allowed after each step)
+    remaining_budget = (budget.max_cost_usd - acc_cost) if budget and budget.max_cost_usd > 0 else float("inf")
+    per_step = remaining_budget / max(len(steps), 1)
+    step_budget_caps = {}
+    for i, step in enumerate(steps):
+        step_budget_caps[str(step["step_id"])] = round(acc_cost + per_step * (i + 1), 6)
+
     await emit_event(task_id, "planner_completed", {
         "step_count": len(steps),
         "tokens_used": acc_tokens,
@@ -167,5 +175,6 @@ async def plan_task(state: AgentState) -> dict:
         "retry_count": 0,
         "consumed_tokens": acc_tokens,
         "consumed_cost": acc_cost,
+        "step_budget_caps": step_budget_caps,
         "logs": [f"Planned {len(steps)} steps (complexity={step_count})"],
     }

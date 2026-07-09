@@ -108,6 +108,29 @@ async def execute_step(state: AgentState) -> dict:
     step = dict(steps[idx])
     step["status"] = "running"
 
+    # Check step budget cap before starting
+    step_budget_caps = state.get("step_budget_caps", {})
+    step_cap = step_budget_caps.get(str(step["step_id"]))
+    prev_cost = state.get("consumed_cost", 0.0)
+    if step_cap is not None and prev_cost >= step_cap:
+        step["status"] = "skipped"
+        step["result"] = "[Step skipped - budget cap exceeded]"
+        updated_steps = list(steps)
+        updated_steps[idx] = step
+        task_id = state.get("task_id", "")
+        await emit_event(task_id, "step_skipped", {
+            "step_id": step["step_id"],
+            "reason": "budget_cap_exceeded",
+            "spent_pct": round(prev_cost / state["budget"].max_cost_usd * 100, 1) if state.get("budget") and state["budget"].max_cost_usd > 0 else 0,
+        })
+        return {
+            "steps": updated_steps,
+            "current_step_index": idx + 1,
+            "status": "executing",
+            "retry_count": 0,
+            "logs": [f"Step {step['step_id']} skipped - budget cap exceeded"],
+        }
+
     task_id = state.get("task_id", "")
     await emit_event(task_id, "step_started", {
         "step_id": step["step_id"],
@@ -163,6 +186,39 @@ async def execute_step(state: AgentState) -> dict:
 
         output, exec_tokens, exec_cost = await _react_loop(llm_with_tools, messages, tier, state)
 
+        prev_tokens = state.get("consumed_tokens", 0)
+        prev_cost = state.get("consumed_cost", 0.0)
+        acc_tokens = prev_tokens + exec_tokens
+        acc_cost = prev_cost + exec_cost
+        budget = state.get("budget")
+
+        # Check if step exceeded its budget cap
+        step_budget_caps = state.get("step_budget_caps", {})
+        step_cap = step_budget_caps.get(str(step["step_id"]))
+        if step_cap is not None and acc_cost >= step_cap:
+            step["status"] = "completed"
+            step["result"] = output[:500] + "\n[Truncated - step budget cap exceeded]" if len(str(output)) > 500 else output
+            step["truncated"] = True
+            updated_steps = list(steps)
+            updated_steps[idx] = step
+            step_results[step["step_id"]] = step["result"]
+            await emit_event(task_id, "step_truncated", {
+                "step_id": step["step_id"],
+                "reason": "budget_cap_exceeded",
+                "spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
+            })
+            return {
+                "steps": updated_steps,
+                "step_results": step_results,
+                "current_step_index": idx + 1,
+                "status": "executing",
+                "retry_count": 0,
+                "errors": [],
+                "consumed_tokens": acc_tokens,
+                "consumed_cost": acc_cost,
+                "logs": [f"Step {step['step_id']} truncated - step budget cap exceeded"],
+            }
+
         step["status"] = "completed"
         step["result"] = output
 
@@ -170,12 +226,6 @@ async def execute_step(state: AgentState) -> dict:
         updated_steps[idx] = step
 
         step_results[step["step_id"]] = output
-
-        prev_tokens = state.get("consumed_tokens", 0)
-        prev_cost = state.get("consumed_cost", 0.0)
-        acc_tokens = prev_tokens + exec_tokens
-        acc_cost = prev_cost + exec_cost
-        budget = state.get("budget")
 
         await emit_event(task_id, "step_completed", {
             "step_id": step["step_id"],

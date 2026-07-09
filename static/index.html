@@ -28,6 +28,12 @@
 
       <section class="card">
         <h2>New Task</h2>
+        <div id="warningBanner" class="warning-banner hidden">
+          <span id="warningIcon">⚠️</span>
+          <div id="warningText"></div>
+          <button id="warningConfirm" class="btn-sm btn-confirm">Run Anyway</button>
+          <button id="warningCancel" class="btn-sm btn-cancel">Cancel</button>
+        </div>
         <form id="taskForm">
           <label for="task">Task Description</label>
           <textarea id="task" rows="3" placeholder="e.g. Write a Python function to compute fibonacci numbers" required></textarea>

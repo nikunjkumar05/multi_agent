@@ -118,6 +118,65 @@ body {
   font-size: 0.7rem;
 }
 
+/* ── Warning banner ────────────────────────────────────────────────────────── */
+
+.warning-banner {
+  background: #da363322;
+  border: 1px solid #da3633;
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.warning-banner #warningIcon {
+  font-size: 1.2rem;
+}
+
+.warning-banner #warningText {
+  flex: 1;
+  font-size: 0.85rem;
+  color: #f85149;
+  min-width: 200px;
+}
+
+.warning-ratio {
+  font-weight: 700;
+  color: #f85149;
+}
+
+.btn-sm {
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-confirm {
+  background: #da3633;
+  color: #fff;
+}
+
+.btn-confirm:hover {
+  background: #f85149;
+}
+
+.btn-cancel {
+  background: #30363d;
+  color: #c9d1d9;
+}
+
+.btn-cancel:hover {
+  background: #484f58;
+}
+
 /* ── Header ────────────────────────────────────────────────────────────────── */
 
 header { margin-bottom: 2rem; }

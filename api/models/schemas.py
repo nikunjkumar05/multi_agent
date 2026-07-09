@@ -15,6 +15,8 @@ class TaskStatusResponse(BaseModel):
     budget_spent_pct: float
     topology: str
     logs: list[str] = []
+    estimated_cost: float | None = None
+    risk_level: str | None = None
 
 
 class AuditResponse(BaseModel):

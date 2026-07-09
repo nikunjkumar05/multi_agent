@@ -8,6 +8,10 @@ const topologyUsed = document.getElementById("topologyUsed");
 const resultOutput = document.getElementById("resultOutput");
 const auditLog = document.getElementById("auditLog");
 const eventList = document.getElementById("eventList");
+const warningBanner = document.getElementById("warningBanner");
+const warningText = document.getElementById("warningText");
+const warningConfirm = document.getElementById("warningConfirm");
+const warningCancel = document.getElementById("warningCancel");
 const submitBtn = document.getElementById("submitBtn");
 const historyList = document.getElementById("historyList");
 const refreshHistoryBtn = document.getElementById("refreshHistory");
@@ -18,31 +22,28 @@ let currentWs = null;
 let currentTaskId = null;
 let collectedEvents = [];
 let historyRefreshInterval = null;
+let pendingTask = null;
 
 // ── Form submission ──────────────────────────────────────────────────────────
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  await submitTask(false);
+});
 
+async function submitTask(skipEstimate) {
   const task = document.getElementById("task").value.trim();
   const budget = parseFloat(document.getElementById("budget").value);
   const topology = document.getElementById("topology").value;
 
   if (!task) return;
 
-  submitBtn.disabled = true;
-  submitBtn.textContent = "Running...";
-  resultSection.classList.remove("hidden");
-  auditSection.classList.add("hidden");
-  eventLogSection.classList.remove("hidden");
-  costSection.classList.add("hidden");
-  statusBadge.textContent = "RUNNING";
-  statusBadge.className = "badge running";
-  topologyUsed.textContent = "";
-  topologyDiagram.classList.add("hidden");
-  resultOutput.innerHTML = "Executing task...";
-  eventList.innerHTML = "";
-  collectedEvents = [];
+  warningBanner.classList.add("hidden");
+
+  if (!skipEstimate) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Estimating...";
+  }
 
   const body = { task, budget_usd: budget };
   if (topology) body.topology = topology;
@@ -57,12 +58,17 @@ form.addEventListener("submit", async (e) => {
     if (!res.ok) {
       throw new Error(data.detail || `HTTP ${res.status}`);
     }
-    const taskId = data.task_id;
-    currentTaskId = taskId;
 
-    connectWebSocket(taskId);
-    pollTask(taskId);
-    startHistoryRefresh();
+    // Check risk level
+    if (data.risk_level === "HIGH" && !skipEstimate) {
+      pendingTask = { data };
+      showWarning(data);
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Run Task";
+      return;
+    }
+
+    startTask(data.task_id);
   } catch (err) {
     statusBadge.textContent = "FAILED";
     statusBadge.className = "badge failed";
@@ -70,7 +76,55 @@ form.addEventListener("submit", async (e) => {
     submitBtn.disabled = false;
     submitBtn.textContent = "Run Task";
   }
+}
+
+function showWarning(data) {
+  const budget = parseFloat(document.getElementById("budget").value);
+  const est = data.estimated_cost || 0;
+  const ratio = budget > 0 ? (est / budget).toFixed(1) : "∞";
+
+  warningBanner.classList.remove("hidden");
+  warningText.innerHTML = `
+    Estimated cost: <strong>$${est.toFixed(4)}</strong> vs budget: <strong>$${budget.toFixed(2)}</strong>
+    <span class="warning-ratio">(${ratio}x budget)</span>
+    <br>Topology: ${data.topology} — this task will likely exceed your budget.
+  `;
+}
+
+warningConfirm.addEventListener("click", async () => {
+  warningBanner.classList.add("hidden");
+  await submitTask(true);
 });
+
+warningCancel.addEventListener("click", () => {
+  warningBanner.classList.add("hidden");
+  pendingTask = null;
+  submitBtn.disabled = false;
+  submitBtn.textContent = "Run Task";
+});
+
+function startTask(taskId) {
+  currentTaskId = taskId;
+
+  resultSection.classList.remove("hidden");
+  auditSection.classList.add("hidden");
+  eventLogSection.classList.remove("hidden");
+  costSection.classList.add("hidden");
+  statusBadge.textContent = "RUNNING";
+  statusBadge.className = "badge running";
+  topologyUsed.textContent = "";
+  topologyDiagram.classList.add("hidden");
+  resultOutput.innerHTML = "Executing task...";
+  eventList.innerHTML = "";
+  collectedEvents = [];
+
+  submitBtn.disabled = false;
+  submitBtn.textContent = "Run Task";
+
+  connectWebSocket(taskId);
+  pollTask(taskId);
+  startHistoryRefresh();
+}
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
 

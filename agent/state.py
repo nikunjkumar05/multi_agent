@@ -63,6 +63,7 @@ class AgentState(TypedDict, total=False):
     degradation_requested: bool
     target_topology: str | None
     topology_history: Annotated[list[dict], operator.add]
+    step_budget_caps: dict[str, float]  # accumulated cost cap per step_id
 
     # Escalation & validation
     validator_confidence: float | None

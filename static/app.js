@@ -134,7 +134,9 @@ function connectWebSocket(taskId) {
   }
 
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${location.host}/ws/${taskId}`;
+  const token = localStorage.getItem("bamas_token") || "";
+  const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+  const wsUrl = `${protocol}//${location.host}/ws/${taskId}${qs}`;
   currentWs = new WebSocket(wsUrl);
 
   currentWs.onmessage = function (e) {

@@ -96,10 +96,15 @@ curl -X POST http://localhost:8001/execute \
 | `GET` | `/` | Frontend UI |
 | `GET` | `/health` | Health check |
 | `POST` | `/execute` | Submit a task |
+| `GET` | `/tasks` | List recent tasks |
 | `GET` | `/tasks/{task_id}` | Get task status and result |
 | `GET` | `/audit/{task_id}` | Get audit trail |
 | `POST` | `/estimate` | Dry-run cost estimation |
-| `WS` | `/ws/{task_id}` | WebSocket real-time events |
+| `GET` | `/rl/stats` | RL policy statistics |
+| `GET` | `/rl/overrides` | Recent RL override decisions |
+| `GET` | `/rl/rewards` | Reward history |
+| `POST` | `/rl/reset?confirm=yes` | Reset RL state to uniform priors |
+| `WS` | `/ws/{task_id}` | WebSocket real-time events (token via `?token=` query param) |
 
 ### POST /execute
 
@@ -152,10 +157,13 @@ multi_agent/
 │   ├── optimizer.py        # Cost-tier optimizer + RL
 │   ├── rl_policy.py        # Thompson Sampling RL policy
 │   ├── projections.py      # State projection for topology degrade
-│   ├── learning.py         # Judge-score feedback loop
-│   ├── stats.py            # Performance tracking
+│   ├── degrader.py         # Pre-execution topology degradation
+│   ├── escalation.py       # Reasoning-divergence escalation
 │   ├── audit.py            # SQLite audit trail
-│   └── events.py           # Redis event broadcaster
+│   ├── events.py           # Redis event broadcaster
+│   ├── node_events.py      # emit_event helper
+│   ├── budget_interrupt.py # Mid-execution budget checkpoint
+│   └── redis_client.py     # Redis connection manager
 ├── agent/                   # Agent layer
 │   ├── state.py            # AgentState TypedDict
 │   ├── graph.py            # run_task() entry point
@@ -167,6 +175,7 @@ multi_agent/
 │   │   ├── judge.py        # Ensemble arbitration
 │   │   ├── budget_gate.py  # Mid-execution interrupt
 │   │   ├── entry_router.py # Resume routing
+│   │   ├── escalation.py   # Judge vs continue routing
 │   │   └── finalizer.py    # Result selection
 │   ├── topologies/         # Graph topologies
 │   │   ├── single.py       # Single agent loop
@@ -182,9 +191,15 @@ multi_agent/
 │       └── db_query.py
 ├── api/                     # FastAPI layer
 │   ├── main.py             # App + CORS + static files
+│   ├── websocket.py        # /ws/{task_id} with JWT auth
 │   ├── models/schemas.py   # Pydantic models
 │   ├── middleware/auth.py   # JWT authentication
 │   └── routes/             # API routes
+│       ├── execute.py      # POST /execute
+│       ├── tasks.py        # GET /tasks, GET /tasks/{id}
+│       ├── audit.py        # GET /audit/{id}
+│       ├── estimate.py     # POST /estimate
+│       └── rl.py           # GET/POST /rl/*
 ├── static/                  # Frontend
 │   ├── index.html
 │   ├── style.css
@@ -192,12 +207,11 @@ multi_agent/
 ├── cli/                     # CLI tool
 │   └── bamas_cli.py
 ├── tests/
-│   ├── unit/               # 268 unit tests
+│   ├── unit/               # Unit tests
 │   ├── integration/        # Integration tests
 │   └── stress_test.py      # Stress test suite
 ├── docs/
-│   ├── plan.md             # Architecture plan
-│   └── file-spec.md        # File specifications
+│   └── plan.md             # Architecture plan
 ├── pyproject.toml
 ├── requirements.txt
 └── .env.example
@@ -206,7 +220,10 @@ multi_agent/
 ## Running Tests
 
 ```bash
-# Unit tests (268 tests, no server needed)
+# All tests (301 tests)
+pytest tests/ -v
+
+# Unit tests only (no server needed)
 pytest tests/unit/ -v
 
 # Integration tests (requires Mistral API key)
@@ -223,8 +240,9 @@ python tests/stress_test.py
 - **API**: FastAPI + Uvicorn
 - **Frontend**: Vanilla JS + CSS (no build step)
 - **State**: LangGraph checkpointing + Redis pub/sub
-- **Database**: SQLite (audit trail)
+- **Database**: SQLite (audit trail + RL persistence)
 - **RL**: Thompson Sampling with 5 topology arms
+- **Auth**: JWT Bearer (HS256) with dev-mode bypass
 
 ## License
 

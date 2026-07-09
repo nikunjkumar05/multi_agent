@@ -526,7 +526,7 @@ tests/test_mid_execution_mechanism.py
 multi_agent/
 ├── agent/
 │   ├── graph.py                # run_task() — delegates to orchestrator
-│   ├── orchestrator.py         # ★ New: run_task_with_degradation()
+│   ├── orchestrator.py         # run_task_with_degradation()
 │   ├── state.py                # BAMASState canonical schema
 │   ├── nodes/
 │   │   ├── planner.py          # Standard LLM (task→1-3 steps)
@@ -535,8 +535,8 @@ multi_agent/
 │   │   ├── judge.py            # Frontier LLM (arbitration)
 │   │   ├── escalation.py       # Route: judge vs continue
 │   │   ├── finalizer.py        # Result dedup + combine
-│   │   ├── budget_gate.py      # ★ New: interrupt on band cross
-│   │   └── entry_router.py     # ★ New: resume-aware routing
+│   │   ├── budget_gate.py      # interrupt on band cross
+│   │   └── entry_router.py     # resume-aware routing
 │   ├── topologies/
 │   │   ├── single.py
 │   │   ├── pipeline.py
@@ -558,25 +558,24 @@ multi_agent/
 │   ├── rl_policy.py            # Contextual Thompson Sampling
 │   ├── budget.py               # BudgetTracker (4 bands)
 │   ├── degrader.py             # Pre-execution topology degradation
-│   ├── projections.py          # ★ New: state projection functions
+│   ├── projections.py          # State projection functions
 │   ├── escalation.py           # Threshold-based escalation
 │   ├── audit.py                # Audit trail (in-memory + SQLite)
 │   ├── events.py               # Redis pub/sub broadcaster
 │   ├── node_events.py          # emit_event helper
 │   ├── budget_interrupt.py     # Mid-execution budget checkpoint
-│   ├── learning.py             # Post-task RL feedback loop
-│   ├── stats.py                # Performance stats tracker
 │   └── redis_client.py         # Redis connection manager
 ├── api/
 │   ├── main.py                 # FastAPI app
-│   ├── websocket.py            # /ws/{task_id}
+│   ├── websocket.py            # /ws/{task_id} (JWT auth via query param)
 │   ├── models/schemas.py       # Pydantic models
 │   ├── middleware/auth.py       # JWT Bearer auth
 │   └── routes/
 │       ├── execute.py          # POST /execute
-│       ├── tasks.py            # GET /tasks/{id}
+│       ├── tasks.py            # GET /tasks, GET /tasks/{id}
 │       ├── audit.py            # GET /audit/{id}
-│       └── estimate.py         # POST /estimate
+│       ├── estimate.py         # POST /estimate
+│       └── rl.py               # GET/POST /rl/*
 ├── cli/
 │   └── bamas_cli.py            # CLI budget burn risk analyzer
 ├── static/
@@ -585,7 +584,6 @@ multi_agent/
 │   └── app.js
 ├── tests/
 │   ├── stress_test.py
-│   ├── test_e2e.py
 │   ├── unit/
 │   │   ├── test_budget.py
 │   │   ├── test_degrader.py
@@ -599,27 +597,20 @@ multi_agent/
 │   │   ├── test_finalizer.py
 │   │   ├── test_planner_complexity.py
 │   │   ├── test_core_fixes.py
-│   │   ├── test_projections.py       # ★ New
-│   │   ├── test_budget_gate.py       # ★ New
-│   │   └── test_entry_router.py      # ★ New
+│   │   ├── test_projections.py
+│   │   ├── test_budget_gate.py
+│   │   ├── test_entry_router.py
+│   │   └── test_bamas_components.py
 │   └── integration/
-│       └── test_api.py
+│       ├── test_api.py
+│       ├── test_topologies.py
+│       ├── test_error_scenarios.py
+│       └── test_websocket.py
 ├── docs/
-│   ├── plan.md
-│   └── file-spec.md
-├── learn.md
-├── commercialization_roadmap.md
-├── rl_policy.json
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── requirements-dev.txt
+│   └── plan.md
 ├── pyproject.toml
-├── .env
-├── .env.example
-├── .gitignore
-├── .dockerignore
-└── .github/workflows/deploy.yml
+├── requirements.txt
+└── .env.example
 ```
 
 ---
@@ -669,47 +660,73 @@ multi_agent/
 
 ## Implementation Phases
 
-### Phase 1: Core Mechanism (Week 1)
+### Phase 1: Core Mechanism ✅ COMPLETED
 
-| Day | Task | Deliverable |
-|-----|------|-------------|
-| D1 | Write `BAMASState` canonical schema in `agent/state.py` | Schema with all topology-specific fields as optional |
-| D2 | Write `core/projections.py` — all 5 direct-edge projection functions + dispatch table | `project_fanout_to_supervisor`, `project_ensemble_to_single`, etc. |
-| D3 | Write `agent/nodes/budget_gate.py` — `BudgetGateAction` enum, `evaluate_gate()`, `budget_gate_node` | Budget gate with interrupt() and GraphBubble catch |
-| D4 | Write `agent/nodes/entry_router.py` — `entry_router_node`, `route_next_step` | Resume-aware routing |
-| D5 | Write toy test: 2-node dummy graph → interrupt → project → new graph → resume | Validates the full mechanism |
+| Day | Task | Status |
+|-----|------|--------|
+| D1 | Write `BAMASState` canonical schema in `agent/state.py` | ✅ Done |
+| D2 | Write `core/projections.py` — all 5 direct-edge projection functions + dispatch table | ✅ Done |
+| D3 | Write `agent/nodes/budget_gate.py` — `BudgetGateAction` enum, `evaluate_gate()`, `budget_gate_node` | ✅ Done |
+| D4 | Write `agent/nodes/entry_router.py` — `entry_router_node`, `route_next_step` | ✅ Done |
+| D5 | Write toy test: 2-node dummy graph → interrupt → project → new graph → resume | ✅ Done |
 
-### Phase 2: Topology Integration (Week 2)
+### Phase 2: Topology Integration ✅ COMPLETED
 
-| Day | Task | Deliverable |
-|-----|------|-------------|
-| D1 | Wire `budget_gate` into `single.py` and `pipeline.py` at natural barriers | Budget gates after executor node |
-| D2 | Wire `budget_gate` into `supervisor.py` after executor→validator boundary | Budget gate in supervisor loop |
-| D3 | Wire `budget_gate` into `fanout.py` after `parallel_workers` join | Budget gate at aggregation point |
-| D4 | Wire `budget_gate` into `ensemble.py` after agent_a/b/c (before judge) | Budget gate at wave completion |
-| D5 | Update `ensemble.py` to emit structured candidate outputs with confidence metadata | `agent_a_result: {output, confidence, ...}` |
-| D6 | Update `fanout.py` to emit `fanout_worker_results` with per-worker status | Per-worker status tracking |
+| Day | Task | Status |
+|-----|------|--------|
+| D1 | Wire `budget_gate` into `single.py` and `pipeline.py` at natural barriers | ✅ Done |
+| D2 | Wire `budget_gate` into `supervisor.py` after executor→validator boundary | ✅ Done |
+| D3 | Wire `budget_gate` into `fanout.py` after `parallel_workers` join | ✅ Done |
+| D4 | Wire `budget_gate` into `ensemble.py` after agent_a/b/c (before judge) | ✅ Done |
+| D5 | Update `ensemble.py` to emit structured candidate outputs with confidence metadata | ✅ Done |
+| D6 | Update `fanout.py` to emit `fanout_worker_results` with per-worker status | ✅ Done |
 
-### Phase 3: Orchestrator Integration (Week 3)
+### Phase 3: Orchestrator Integration ✅ COMPLETED
 
-| Day | Task | Deliverable |
-|-----|------|-------------|
-| D1 | Write `agent/orchestrator.py` — `run_task_with_degradation()` | Full loop with interrupt catch, project, rebuild, resume |
-| D2 | Refactor `agent/graph.py` — replace single `ainvoke()` with orchestrator | `run_task()` delegates to orchestrator |
-| D3 | Add LLM cancellation token support — track `asyncio.Task` in orchestrator | Cancel in-flight calls on interrupt |
-| D4 | Add CRITICAL-on-single terminal policy | `degraded_completion` status, accept best output |
-| D5 | Integration test: full degrade chain ensemble→fanout→supervisor→pipeline→single | Multi-step degrade chain test |
+| Day | Task | Status |
+|-----|------|--------|
+| D1 | Write `agent/orchestrator.py` — `run_task_with_degradation()` | ✅ Done |
+| D2 | Refactor `agent/graph.py` — replace single `ainvoke()` with orchestrator | ✅ Done |
+| D3 | Add LLM cancellation token support — track `asyncio.Task` in orchestrator | ✅ Done |
+| D4 | Add CRITICAL-on-single terminal policy | ✅ Done |
+| D5 | Integration test: full degrade chain ensemble→fanout→supervisor→pipeline→single | ✅ Done |
 
-### Phase 4: Testing & Hardening (Week 4)
+### Phase 4: Testing & Hardening ✅ COMPLETED
 
-| Day | Task | Deliverable |
-|-----|------|-------------|
-| D1 | Unit tests for all 5 projection functions | `tests/unit/test_projections.py` |
-| D2 | Unit tests for budget gate evaluation (all 4 bands) | `tests/unit/test_budget_gate.py` |
-| D3 | Unit tests for entry router (cold start, resume, skip) | `tests/unit/test_entry_router.py` |
-| D4 | Integration test: parallel interrupt race (fanout/ensemble both gates fire) | GraphBubble catch verified |
-| D5 | Schema contract test: all 5 topologies runnable with None-valued optional fields | `test_all_topologies_satisfy_contract` |
-| D6 | Stress test: mock budgets forcing mid-execution degradation | `tests/stress_test.py` with forced band breaches |
+| Day | Task | Status |
+|-----|------|--------|
+| D1 | Unit tests for all 5 projection functions | ✅ Done |
+| D2 | Unit tests for budget gate evaluation (all 4 bands) | ✅ Done |
+| D3 | Unit tests for entry router (cold start, resume, skip) | ✅ Done |
+| D4 | Integration test: parallel interrupt race (fanout/ensemble both gates fire) | ✅ Done |
+| D5 | Schema contract test: all 5 topologies runnable with None-valued optional fields | ✅ Done |
+| D6 | Stress test: mock budgets forcing mid-execution degradation | ✅ Done |
+
+### Phase 5: Production Features ✅ COMPLETED
+
+| Task | Status |
+|------|--------|
+| Budget tracking via state fields (Annotated reducer) | ✅ Done |
+| Pre-execution cost estimate + risk level | ✅ Done |
+| Per-step budget caps (planner divides, executor enforces) | ✅ Done |
+| Budget-gated agents (ensemble, fanout, judge, validator skip) | ✅ Done |
+| Frontend dashboard (task history, topology viz, cost breakdown) | ✅ Done |
+| WebSocket heartbeat + integration tests | ✅ Done |
+| RL reset endpoint (POST /rl/reset) | ✅ Done |
+| Code review fixes (atomicity, confirm guard, DRY tests) | ✅ Done |
+
+### Phase 6: Developer Tools ✅ COMPLETED
+
+| Task | Status |
+|------|--------|
+| `bamas-cli` dry-run tool | ✅ Done |
+| JWT auth middleware | ✅ Done |
+| JWT auth wired to all routes (tasks, websocket, rl, audit, execute, estimate) | ✅ Done |
+| README.md updated (301 tests, /rl endpoints, project structure) | ✅ Done |
+| plan.md updated (directory tree, phase status) | ✅ Done |
+| PyPI packaging (pyproject.toml with hatchling) | ✅ Done |
+
+**301 tests passing.**
 
 ---
 

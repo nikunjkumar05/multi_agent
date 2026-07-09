@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from api.middleware.auth import require_auth
 from api.models.schemas import TaskStatusResponse
 from api.routes.execute import _tasks
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @router.get("/tasks", response_model=list[TaskStatusResponse])

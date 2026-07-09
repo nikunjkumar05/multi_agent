@@ -1,7 +1,8 @@
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import jwt
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from core.events import EventBroadcaster
 from core.redis_client import get_redis
@@ -9,10 +10,32 @@ from core.redis_client import get_redis
 router = APIRouter()
 
 _HEARTBEAT_INTERVAL = 20  # seconds
+_DEFAULT_SECRET = "change-me-in-production"
+
+
+def _validate_ws_token(token: str | None) -> bool:
+    """Validate JWT token from query param. Returns True if valid or auth disabled."""
+    from core.config import settings
+    if settings.jwt_secret == _DEFAULT_SECRET:
+        return True
+    if token is None:
+        return False
+    try:
+        jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+        return True
+    except jwt.PyJWTError:
+        return False
 
 
 @router.websocket("/ws/{task_id}")
-async def websocket_endpoint(ws: WebSocket, task_id: str) -> None:
+async def websocket_endpoint(
+    ws: WebSocket, task_id: str, token: str | None = Query(default=None)
+) -> None:
+    if not _validate_ws_token(token):
+        await ws.accept()
+        await ws.close(code=4001, reason="Unauthorized")
+        return
+
     await ws.accept()
     redis = await get_redis()
     if redis is None:

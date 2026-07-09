@@ -95,6 +95,9 @@ async def plan_task(state: AgentState) -> dict:
     tier = state["decision"].model_tiers.get("planner", "standard")
     llm = create_llm(tier)
 
+    local_tokens = 0
+    local_cost = 0.0
+
     try:
         response = await asyncio.wait_for(
             llm.ainvoke([
@@ -107,15 +110,8 @@ async def plan_task(state: AgentState) -> dict:
             timeout=PLANNER_TIMEOUT,
         )
 
-        budget = state.get("budget")
-        if budget:
-            try:
-                budget.record_usage(
-                    tokens=estimate_tokens(response),
-                    cost=estimate_cost(response, tier),
-                )
-            except Exception:
-                pass
+        local_tokens = estimate_tokens(response)
+        local_cost = estimate_cost(response, tier)
 
         content = _extract_text(response.content)
         cleaned_content = _strip_code_fences(content)
@@ -153,11 +149,15 @@ async def plan_task(state: AgentState) -> dict:
     ]
 
     budget = state.get("budget")
+    prev_tokens = state.get("consumed_tokens", 0) if state else 0
+    prev_cost = state.get("consumed_cost", 0.0) if state else 0.0
+    acc_tokens = prev_tokens + local_tokens
+    acc_cost = prev_cost + local_cost
     await emit_event(task_id, "planner_completed", {
         "step_count": len(steps),
-        "tokens_used": budget.consumed_tokens if budget else 0,
-        "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
-        "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+        "tokens_used": acc_tokens,
+        "cost_usd": round(acc_cost, 6),
+        "budget_spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
     })
 
     return {
@@ -165,5 +165,7 @@ async def plan_task(state: AgentState) -> dict:
         "current_step_index": 0,
         "status": "planning",
         "retry_count": 0,
+        "consumed_tokens": acc_tokens,
+        "consumed_cost": acc_cost,
         "logs": [f"Planned {len(steps)} steps (complexity={step_count})"],
     }

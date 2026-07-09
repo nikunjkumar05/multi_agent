@@ -105,20 +105,21 @@ async def ensemble_judge(state: AgentState) -> dict:
         response = None
 
     budget = state.get("budget")
-    if budget and response is not None:
-        try:
-            budget.record_usage(
-                tokens=estimate_tokens(response),
-                cost=estimate_cost(response, tier),
-            )
-        except Exception:
-            pass
+    prev_tokens = state.get("consumed_tokens", 0)
+    prev_cost = state.get("consumed_cost", 0.0)
+    judge_tokens = 0
+    judge_cost = 0.0
+    if response is not None:
+        judge_tokens = estimate_tokens(response)
+        judge_cost = estimate_cost(response, tier)
+    acc_tokens = prev_tokens + judge_tokens
+    acc_cost = prev_cost + judge_cost
 
     await emit_event(task_id, "judge_completed", {
         "result_preview": str(judge_output)[:200],
-        "tokens_used": budget.consumed_tokens if budget else 0,
-        "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
-        "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+        "tokens_used": acc_tokens,
+        "cost_usd": round(acc_cost, 6),
+        "budget_spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
     })
 
     return {
@@ -126,5 +127,7 @@ async def ensemble_judge(state: AgentState) -> dict:
         "final_output": judge_output,
         "final_result": judge_output,
         "status": "completed",
+        "consumed_tokens": acc_tokens,
+        "consumed_cost": acc_cost,
         "logs": ["Judge produced final result"],
     }

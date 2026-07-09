@@ -57,6 +57,8 @@ class AgentState(TypedDict, total=False):
 
     # Budget & degradation
     budget: BudgetTracker
+    consumed_tokens: Annotated[int, operator.add]
+    consumed_cost: Annotated[float, operator.add]
     last_budget_band: str | None
     degradation_requested: bool
     target_topology: str | None

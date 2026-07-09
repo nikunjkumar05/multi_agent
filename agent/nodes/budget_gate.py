@@ -42,28 +42,31 @@ def evaluate_gate(state: dict) -> BudgetGateAction:
     """
     Evaluate budget state and return the required action.
     Pure function, no side effects.
+    Uses accumulated consumed_cost from state (not BudgetTracker, which may be stale due to serialization).
     """
     budget: BudgetTracker | None = state.get("budget")
     if budget is None:
         return BudgetGateAction.CONTINUE
 
-    band = budget.get_band()
+    # Use accumulated cost from state nodes (BudgetTracker object may be stale due to LangGraph serialization)
+    acc_cost = state.get("consumed_cost", 0.0)
+    if acc_cost == 0.0 and budget:
+        acc_cost = budget.consumed_cost  # Fallback for tests and non-LangGraph callers
+    spent_pct = (acc_cost / budget.max_cost_usd * 100) if budget.max_cost_usd > 0 else 0.0
     topology = state.get("topology", "single")
 
-    if band in (BudgetBand.HEALTHY, BudgetBand.TIER_DOWNGRADE):
+    if spent_pct < 90:
         return BudgetGateAction.CONTINUE
 
-    if band == BudgetBand.STRUCTURAL_DEGRADE:
+    if spent_pct < 100:
         if topology == "single":
             return BudgetGateAction.CONTINUE
         return BudgetGateAction.PAUSE
 
-    if band == BudgetBand.CRITICAL:
-        if topology == "single":
-            return BudgetGateAction.SKIP_JUDGE
-        return BudgetGateAction.EMERGENCY_SINGLE
-
-    return BudgetGateAction.CONTINUE
+    # spent_pct >= 100
+    if topology == "single":
+        return BudgetGateAction.SKIP_JUDGE
+    return BudgetGateAction.EMERGENCY_SINGLE
 
 
 async def budget_gate_node(state: dict) -> dict:
@@ -81,7 +84,10 @@ async def budget_gate_node(state: dict) -> dict:
     task_id = state.get("task_id", "")
     topology = state.get("topology", "single")
     budget: BudgetTracker | None = state.get("budget")
-    band = budget.get_band().value if budget else "unknown"
+    acc_cost = state.get("consumed_cost", 0.0)
+    acc_tokens = state.get("consumed_tokens", 0)
+    spent_pct = (acc_cost / budget.max_cost_usd * 100) if budget and budget.max_cost_usd > 0 else 0.0
+    band = "healthy" if spent_pct < 70 else "tier_downgrade" if spent_pct < 90 else "structural_degrade" if spent_pct < 100 else "critical"
 
     if action == BudgetGateAction.PAUSE:
         to_topology = _next_topology(topology)
@@ -93,16 +99,16 @@ async def budget_gate_node(state: dict) -> dict:
                 "from_topology": topology,
                 "to_topology": to_topology,
                 "message": f"Budget gate: {band} on {topology} → interrupt for degradation to {to_topology}",
-                "consumed_tokens": budget.consumed_tokens if budget else 0,
-                "consumed_cost": round(budget.consumed_cost, 6) if budget else 0,
-                "spent_pct": round(budget.spent_pct, 1) if budget else 0,
+                "consumed_tokens": acc_tokens,
+                "consumed_cost": round(acc_cost, 6),
+                "spent_pct": round(spent_pct, 1),
             },
         )
         audit = get_audit_trail()
         audit.record_budget_band(
             task_id=task_id,
             band=band,
-            remaining_budget=budget.remaining_pct if budget else 0,
+            remaining_budget=max(0, 100 - spent_pct),
             action=f"Budget gate PAUSE: interrupting {topology} for degradation to {to_topology}",
         )
         interrupt({
@@ -122,16 +128,16 @@ async def budget_gate_node(state: dict) -> dict:
                 "from_topology": topology,
                 "to_topology": "single",
                 "message": f"Budget gate: {band} on {topology} → emergency collapse to single",
-                "consumed_tokens": budget.consumed_tokens if budget else 0,
-                "consumed_cost": round(budget.consumed_cost, 6) if budget else 0,
-                "spent_pct": round(budget.spent_pct, 1) if budget else 0,
+                "consumed_tokens": acc_tokens,
+                "consumed_cost": round(acc_cost, 6),
+                "spent_pct": round(spent_pct, 1),
             },
         )
         audit = get_audit_trail()
         audit.record_budget_band(
             task_id=task_id,
             band=band,
-            remaining_budget=budget.remaining_pct if budget else 0,
+            remaining_budget=max(0, 100 - spent_pct),
             action=f"Budget gate EMERGENCY: collapsing {topology} to single",
         )
         interrupt({
@@ -150,9 +156,9 @@ async def budget_gate_node(state: dict) -> dict:
                 "band": band,
                 "topology": topology,
                 "message": f"Budget gate: {band} on single → skipping judge",
-                "consumed_tokens": budget.consumed_tokens if budget else 0,
-                "consumed_cost": round(budget.consumed_cost, 6) if budget else 0,
-                "spent_pct": round(budget.spent_pct, 1) if budget else 0,
+                "consumed_tokens": acc_tokens,
+                "consumed_cost": round(acc_cost, 6),
+                "spent_pct": round(spent_pct, 1),
             },
         )
         return {"skip_judge": True}

@@ -152,6 +152,7 @@ async def execute_step(state: AgentState) -> dict:
     ]
 
     budget = state.get("budget")
+    step_results = dict(state.get("step_results", {}))
 
     try:
         langchain_tools = registry.get_langchain_tools()
@@ -160,7 +161,7 @@ async def execute_step(state: AgentState) -> dict:
         else:
             llm_with_tools = llm
 
-        output = await _react_loop(llm_with_tools, messages, tier, state)
+        output, exec_tokens, exec_cost = await _react_loop(llm_with_tools, messages, tier, state)
 
         step["status"] = "completed"
         step["result"] = output
@@ -168,15 +169,20 @@ async def execute_step(state: AgentState) -> dict:
         updated_steps = list(steps)
         updated_steps[idx] = step
 
-        step_results = dict(state.get("step_results", {}))
         step_results[step["step_id"]] = output
+
+        prev_tokens = state.get("consumed_tokens", 0)
+        prev_cost = state.get("consumed_cost", 0.0)
+        acc_tokens = prev_tokens + exec_tokens
+        acc_cost = prev_cost + exec_cost
+        budget = state.get("budget")
 
         await emit_event(task_id, "step_completed", {
             "step_id": step["step_id"],
             "result_preview": str(output)[:200],
-            "tokens_used": budget.consumed_tokens if budget else 0,
-            "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
-            "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+            "tokens_used": acc_tokens,
+            "cost_usd": round(acc_cost, 6),
+            "budget_spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
         })
 
         return {
@@ -186,6 +192,8 @@ async def execute_step(state: AgentState) -> dict:
             "status": "executing",
             "retry_count": 0,
             "errors": [],
+            "consumed_tokens": acc_tokens,
+            "consumed_cost": acc_cost,
             "logs": [f"Completed step {step['step_id']}"],
         }
 
@@ -217,25 +225,23 @@ async def execute_step(state: AgentState) -> dict:
         }
 
 
-async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) -> str:
-    budget = state.get("budget")
+async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) -> tuple[str, int, float]:
     tool_messages: list = []
     executed_code_hashes: set[int] = set()
+    loop_tokens = 0
+    loop_cost = 0.0
 
     for _iteration in range(MAX_TOOL_ITERATIONS):
         response = await llm.ainvoke(messages + tool_messages)
 
-        if budget:
-            budget.record_usage(
-                tokens=estimate_tokens(response),
-                cost=estimate_cost(response, tier),
-            )
+        loop_tokens += estimate_tokens(response)
+        loop_cost += estimate_cost(response, tier)
 
         if not isinstance(response, AIMessage):
-            return _extract_text(response.content)
+            return _extract_text(response.content), loop_tokens, loop_cost
 
         if not response.tool_calls:
-            return _extract_text(response.content)
+            return _extract_text(response.content), loop_tokens, loop_cost
 
         tool_messages.append(response)
         for tool_call in response.tool_calls:
@@ -286,4 +292,4 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
         last_ai_content = "\n".join(
             str(m.content)[:500] for m in tool_messages if isinstance(m, ToolMessage)
         )
-    return str(last_ai_content)[:1000] + "\n\n[Tool loop limit reached]"
+    return str(last_ai_content)[:1000] + "\n\n[Tool loop limit reached]", loop_tokens, loop_cost

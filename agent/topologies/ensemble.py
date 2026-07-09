@@ -60,22 +60,14 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
             content = f"[Agent {role} failed: {e}]"
             response = None
 
-        budget = state.get("budget")
-        if budget and response is not None:
-            try:
-                budget.record_usage(
-                    tokens=estimate_tokens(response),
-                    cost=estimate_cost(response, tier),
-                )
-            except Exception:
-                pass
+        agent_tokens = estimate_tokens(response) if response is not None else 0
+        agent_cost = estimate_cost(response, tier) if response is not None else 0.0
 
         await emit_event(task_id, "agent_completed", {
             "agent_key": agent_key,
             "role": role,
-            "tokens_used": budget.consumed_tokens if budget else 0,
-            "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
-            "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+            "tokens_used": agent_tokens,
+            "cost_usd": round(agent_cost, 6),
         })
 
         step_results = dict(state.get("step_results", {}))
@@ -92,6 +84,8 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
         return {
             "step_results": step_results,
             "candidate_outputs": candidate_outputs,
+            "consumed_tokens": agent_tokens,
+            "consumed_cost": agent_cost,
             "logs": [f"Agent {role} completed"],
         }
 

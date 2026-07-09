@@ -52,19 +52,20 @@ async def supervisor_node(state: AgentState) -> dict:
     response = await llm.ainvoke(messages)
     content = response.content.strip() if isinstance(response.content, str) else str(response.content).strip()
 
-    budget = state.get("budget")
-    if budget:
-        budget.record_usage(
-            tokens=estimate_tokens(response),
-            cost=estimate_cost(response, tier),
-        )
+    sup_tokens = estimate_tokens(response)
+    sup_cost = estimate_cost(response, tier)
 
     task_id = state.get("task_id", "")
+    budget = state.get("budget")
+    prev_tokens = state.get("consumed_tokens", 0)
+    prev_cost = state.get("consumed_cost", 0.0)
+    acc_tokens = prev_tokens + sup_tokens
+    acc_cost = prev_cost + sup_cost
     await emit_event(task_id, "supervisor_decided", {
         "next_step_id": content,
-        "tokens_used": budget.consumed_tokens if budget else 0,
-        "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
-        "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+        "tokens_used": acc_tokens,
+        "cost_usd": round(acc_cost, 6),
+        "budget_spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
     })
 
     try:
@@ -80,7 +81,7 @@ async def supervisor_node(state: AgentState) -> dict:
         target_idx = next((i for i, s in enumerate(steps) if s["status"] == "pending"), idx)
     else:
         target_idx = match
-    return {"current_step_index": target_idx, "status": "executing"}
+    return {"current_step_index": target_idx, "status": "executing", "consumed_tokens": acc_tokens, "consumed_cost": acc_cost}
 
 
 def _route_after_supervisor(state: AgentState) -> Literal["executor", "judge", "finalizer"]:

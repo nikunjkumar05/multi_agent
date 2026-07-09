@@ -53,6 +53,8 @@ async def run_task(
         "topology": degraded_topology,
         "decision": decision,
         "budget": budget,
+        "consumed_tokens": 0,
+        "consumed_cost": 0.0,
         "last_budget_band": BudgetBand.HEALTHY.value,
         # Execution plan
         "plan_steps": [],
@@ -115,6 +117,11 @@ async def run_task(
     # Use final topology from orchestrator (may have degraded)
     final_topology = result.get("topology", degraded_topology)
 
+    # Read accumulated budget from result (nodes return these via state updates)
+    acc_tokens = result.get("consumed_tokens", 0)
+    acc_cost = result.get("consumed_cost", 0.0)
+    spent_pct = (acc_cost / budget.max_cost_usd * 100) if budget and budget.max_cost_usd > 0 else 0.0
+
     audit = get_audit_trail()
     audit.record(
         task_id=task_id,
@@ -122,7 +129,7 @@ async def run_task(
         detail={
             "topology": final_topology,
             "status": result.get("status", "unknown"),
-            "budget_spent_pct": budget.spent_pct,
+            "budget_spent_pct": spent_pct,
             "final_result_preview": str(result.get("final_output") or result.get("final_result", ""))[:200],
             "degradation_count": result.get("degradation_count", 0),
         },
@@ -134,9 +141,9 @@ async def run_task(
         {
             "status": result.get("status", "failed"),
             "final_result": str(result.get("final_output") or result.get("final_result", ""))[:500],
-            "budget_spent_pct": round(budget.spent_pct, 1),
-            "tokens_used": budget.consumed_tokens,
-            "cost_usd": round(budget.consumed_cost, 6),
+            "budget_spent_pct": round(spent_pct, 1),
+            "tokens_used": acc_tokens,
+            "cost_usd": round(acc_cost, 6),
             "topology": final_topology,
             "degradation_count": result.get("degradation_count", 0),
         },
@@ -154,7 +161,7 @@ async def run_task(
                 budget_band=budget.get_band().value,
                 task=task,
                 quality_score=quality,
-                cost_usd=budget.consumed_cost,
+                cost_usd=acc_cost,
                 budget_total=budget.max_cost_usd,
                 llm_topology=decision.llm_topology,
             )
@@ -167,7 +174,7 @@ async def run_task(
         "status": result.get("status", "failed"),
         "final_result": final_output,
         "judge_output": result.get("judge_output"),
-        "budget_spent_pct": budget.spent_pct,
+        "budget_spent_pct": spent_pct,
         "topology": final_topology,
         "degradation_count": result.get("degradation_count", 0),
         "logs": result.get("logs", []),

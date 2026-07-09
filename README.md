@@ -1,8 +1,8 @@
-# BAMASE — Budget-Aware Multi-Agent Task Executor
+# BAMAS — Budget-Aware Multi-Agent System
 
-This repository contains the implementation for the AAAI-26 paper "BAMAS: Structuring Budget-Aware Multi-Agent Systems". Yang, L., Luo, J., Liu, X., Lou, Y., & Chen, Z. (2026). BAMAS: Structuring Budget-Aware Multi-Agent Systems.
+A budget-aware multi-agent system that accepts plain-English tasks via API, uses a cost-tier optimizer (adapted from [BAMAS](https://arxiv.org/abs/2504.11428)) to select topology and model tiers, then orchestrates specialized agents with reasoning-divergence escalation and **mid-execution topology degradation** under budget pressure.
 
-A budget-aware multi-agent system that accepts plain-English tasks via API, uses a cost-tier optimizer (adapted from [BAMAS](https://arxiv.org/abs/2504.11428)) to select topology and model tiers, then orchestrates four specialized agents with reasoning-divergence escalation and pre-execution topology degradation under budget pressure.
+> Based on the peer-reviewed AAAI-26 paper: Yang, L. et al. (2026). *BAMAS: Structuring Budget-Aware Multi-Agent Systems.* AAAI-40, pp. 29802–29810.
 
 ## Architecture
 
@@ -11,71 +11,82 @@ POST /execute {task, budget_usd}
         │
         ▼
 ┌─────────────────────┐
-│ Cost-Tier Optimizer │ ← LLM + rule-based fallback
+│ Cost-Tier Optimizer │ ← LLM semantic + rule fallback + RL
 │  selects topology   │
 └────────┬────────────┘
          ▼
 ┌─────────────────────┐
-│  Agent Team         │
-│  Planner → Executor │
-│  → Validator        │
-└────────┬────────────┘
-         ▼
-┌─────────────────────┐ 
-│ Escalation Engine   │ ← triggers on reasoning     
-│ → Judge (if needed) │
-└────────┬────────────┘
-         ▼
-┌─────────────────────┐
-│  Budget Governor    │ ← collapses topology at 90% spent
+│  Budget Governor    │ ← pre-execution collapse
 │  degrades topology  │
 └────────┬────────────┘
          ▼
-   Result + Audit Trail
+┌─────────────────────────────────────┐
+│  Agent Team (topology-dependent)    │
+│  Planner → Executor → Validator    │
+│  → Budget Gate → Judge → Finalizer │
+└────────┬────────────────────────────┘
+         ▼
+   Result + Audit Trail + WebSocket Events
 ```
 
 ## Features
 
-- **Cost-tier optimizer** — LLM-based topology selection with rule-based fallback (BAMAS adaptation)
 - **5 topology modes** — single, pipeline, supervisor, fanout, ensemble
+- **Mid-execution budget degradation** — interrupt → project → rebuild → resume
+- **Cost-tier optimizer** — LLM semantic classification + rule-based fallback + Thompson Sampling RL
 - **Reasoning-divergence escalation** — Judge invoked when Validator confidence drops
-- **Pre-execution topology collapse** — degrades ensemble → fanout → supervisor → pipeline → single before graph starts
-- **Budget bands** — HEALTHY (<70%), TIER_DOWNGRADE (70-90%), STRUCTURAL_DEGRADE (90-100%), CRITICAL (>100%)
-- **Mistral LLM** — configurable via `.env`, supports OpenAI/Ollama fallbacks
-- **Real-time frontend** — status polling, audit trail display
-- **Stress test suite** — topology sweep, budget sweep, concurrent testing
+- **4-band budget governor** — HEALTHY → TIER_DOWNGRADE → STRUCTURAL_DEGRADE → CRITICAL
+- **Real-time WebSocket events** — live execution log with heartbeat
+- **SQLite audit trail** — persistent task history
+- **JWT authentication** — dev-mode bypass for local development
+- **CLI tool** — `bamas-cli` for budget burn risk analysis
 
 ## Quick Start
+
+### Prerequisites
+
+- Python 3.12+
+- Redis (for RL policy and WebSocket events)
+- Mistral API key (or OpenAI/Ollama)
 
 ### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
+pip install -r requirements-dev.txt  # for testing
 ```
 
 ### 2. Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env with your Mistral API key
+# Edit .env:
+#   LLM_PROVIDER=mistral
+#   MISTRAL_API_KEY=your-key-here
 ```
 
-### 3. Start the server
+### 3. Start Redis
 
 ```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+redis-server
 ```
 
-### 4. Open the frontend
-
-Navigate to [http://localhost:8000](http://localhost:8000)
-
-### 5. Run a task
+### 4. Start the server
 
 ```bash
-curl -X POST http://localhost:8000/execute \
+uvicorn api.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+### 5. Open the frontend
+
+Navigate to [http://localhost:8001](http://localhost:8001)
+
+### 6. Run a task
+
+```bash
+curl -X POST http://localhost:8001/execute \
   -H "Content-Type: application/json" \
-  -d '{"task": "Write a Python function to compute fibonacci numbers", "budget_usd": 0.50}'
+  -d '{"task": "What is 2+2?", "budget_usd": 0.10}'
 ```
 
 ## API Endpoints
@@ -85,8 +96,10 @@ curl -X POST http://localhost:8000/execute \
 | `GET` | `/` | Frontend UI |
 | `GET` | `/health` | Health check |
 | `POST` | `/execute` | Submit a task |
-| `GET` | `/tasks/{task_id}` | Get task status |
+| `GET` | `/tasks/{task_id}` | Get task status and result |
 | `GET` | `/audit/{task_id}` | Get audit trail |
+| `POST` | `/estimate` | Dry-run cost estimation |
+| `WS` | `/ws/{task_id}` | WebSocket real-time events |
 
 ### POST /execute
 
@@ -98,6 +111,36 @@ curl -X POST http://localhost:8000/execute \
 }
 ```
 
+### POST /estimate
+
+```json
+{
+  "task": "Write a Python function to compute fibonacci numbers",
+  "budget_usd": 0.50
+}
+```
+
+Returns: topology, model tiers, estimated cost, budget headroom.
+
+## Topology Selection
+
+| Topology | Use Case | Example |
+|----------|----------|---------|
+| `single` | Trivial Q&A, one-liner | "What is 2+2?" |
+| `pipeline` | Multi-step sequential | "First do X, then Y" |
+| `supervisor` | Complex with dispatch | "Research and explain" |
+| `fanout` | Parallel workers | "List 5 things" |
+| `ensemble` | Critical validation | "Audit this code" |
+
+## Budget Bands
+
+| Band | Spent % | Action |
+|------|---------|--------|
+| HEALTHY | <70% | Full flexibility |
+| TIER_DOWNGRADE | 70-90% | Downgrade model tiers |
+| STRUCTURAL_DEGRADE | 90-100% | Collapse topology |
+| CRITICAL | >100% | Single topology, skip Judge |
+
 ## Project Structure
 
 ```
@@ -106,27 +149,32 @@ multi_agent/
 │   ├── config.py           # Settings (Mistral/OpenAI/Ollama)
 │   ├── llm.py              # Multi-provider LLM factory
 │   ├── budget.py           # BudgetTracker with 4 bands
-│   ├── optimizer.py        # Cost-tier optimizer + rule-based fallback
-│   ├── degrader.py         # Mid-execution topology collapse
-│   ├── escalation.py       # Reasoning-divergence escalation
-│   └── audit.py            # Audit trail singleton
+│   ├── optimizer.py        # Cost-tier optimizer + RL
+│   ├── rl_policy.py        # Thompson Sampling RL policy
+│   ├── projections.py      # State projection for topology degrade
+│   ├── learning.py         # Judge-score feedback loop
+│   ├── stats.py            # Performance tracking
+│   ├── audit.py            # SQLite audit trail
+│   └── events.py           # Redis event broadcaster
 ├── agent/                   # Agent layer
 │   ├── state.py            # AgentState TypedDict
 │   ├── graph.py            # run_task() entry point
+│   ├── orchestrator.py     # Mid-execution degradation loop
 │   ├── nodes/              # Agent nodes
-│   │   ├── planner.py      # Plans task steps (1-3 max)
-│   │   ├── executor.py     # Executes steps with context
-│   │   ├── validator.py    # Validates with confidence scoring
+│   │   ├── planner.py      # Plans task steps
+│   │   ├── executor.py     # ReAct loop with tools
+│   │   ├── validator.py    # Confidence scoring
 │   │   ├── judge.py        # Ensemble arbitration
-│   │   ├── escalation.py   # Escalation decision wrapper
-│   │   └── finalizer.py    # Smart result selection
+│   │   ├── budget_gate.py  # Mid-execution interrupt
+│   │   ├── entry_router.py # Resume routing
+│   │   └── finalizer.py    # Result selection
 │   ├── topologies/         # Graph topologies
-│   │   ├── single.py       # planner → executor → validator (loop)
-│   │   ├── pipeline.py     # Sequential with judge
-│   │   ├── supervisor.py   # Supervisor dispatches to workers
-│   │   ├── fanout.py       # 3 parallel workers
-│   │   ├── ensemble.py     # 2 prompt variants + 1 different model
-│   │   └── builder.py      # compile_graph() selector
+│   │   ├── single.py       # Single agent loop
+│   │   ├── pipeline.py     # Sequential steps
+│   │   ├── supervisor.py   # Supervisor dispatch
+│   │   ├── fanout.py       # Parallel workers
+│   │   ├── ensemble.py     # 3 parallel agents
+│   │   └── builder.py      # compile_graph()
 │   └── tools/              # Tool implementations
 │       ├── code_executor.py
 │       ├── web_search.py
@@ -135,58 +183,38 @@ multi_agent/
 ├── api/                     # FastAPI layer
 │   ├── main.py             # App + CORS + static files
 │   ├── models/schemas.py   # Pydantic models
+│   ├── middleware/auth.py   # JWT authentication
 │   └── routes/             # API routes
-│       ├── execute.py
-│       ├── tasks.py
-│       └── audit.py
 ├── static/                  # Frontend
 │   ├── index.html
 │   ├── style.css
 │   └── app.js
+├── cli/                     # CLI tool
+│   └── bamas_cli.py
 ├── tests/
+│   ├── unit/               # 268 unit tests
+│   ├── integration/        # Integration tests
 │   └── stress_test.py      # Stress test suite
 ├── docs/
-│   ├── plan.md             # Full architecture plan
+│   ├── plan.md             # Architecture plan
 │   └── file-spec.md        # File specifications
+├── pyproject.toml
 ├── requirements.txt
-├── requirements-dev.txt
 └── .env.example
 ```
 
-## Topology Selection
-
-The optimizer selects topology based on task complexity:
-
-| Topology | Use Case | Example |
-|----------|----------|---------|
-| `single` | Trivial Q&A, one-liner | "What is 2+2?" |
-| `pipeline` | Code generation, writing | "Write a fibonacci function" |
-| `supervisor` | Research, explanations | "Explain TCP vs UDP" |
-| `fanout` | Data analysis, parallel | "Analyze these datasets" |
-| `ensemble` | Critical validation | "Audit this code" |
-
-Override via API: `{"task": "...", "topology": "pipeline"}`
-
-## Budget Bands
-
-| Band | Spent % | Action |
-|------|---------|--------|
-| HEALTHY | <70% | Full flexibility |
-| TIER_DOWNGRADE | 70-90% | frontier→standard, standard→cheap |
-| STRUCTURAL_DEGRADE | 90-100% | Collapse topology (ensemble→fanout→...) |
-| CRITICAL | >100% | Only cheap model, skip Judge |
-
-## Stress Test
+## Running Tests
 
 ```bash
-# Start server first
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+# Unit tests (268 tests, no server needed)
+pytest tests/unit/ -v
 
-# Run stress test
+# Integration tests (requires Mistral API key)
+pytest tests/integration/ -v
+
+# Stress test (requires running server)
 python tests/stress_test.py
 ```
-
-Tests: topology sweep, budget sweep, task complexity, concurrent execution.
 
 ## Tech Stack
 
@@ -194,12 +222,9 @@ Tests: topology sweep, budget sweep, task complexity, concurrent execution.
 - **Framework**: LangGraph + LangChain
 - **API**: FastAPI + Uvicorn
 - **Frontend**: Vanilla JS + CSS (no build step)
-- **State**: In-memory dict + Redis pub/sub events
-- **Optimizer**: LLM semantic classification + rule-based fallback + RL refinement
-
-## Technical Deep Dive
-
-See [`learn.md`](learn.md) for a comprehensive technical reference covering every module, data flow, code path, and implementation detail.
+- **State**: LangGraph checkpointing + Redis pub/sub
+- **Database**: SQLite (audit trail)
+- **RL**: Thompson Sampling with 5 topology arms
 
 ## License
 

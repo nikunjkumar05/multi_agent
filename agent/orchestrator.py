@@ -186,6 +186,8 @@ def _build_result(
         "judge_output": result.get("judge_output"),
         "topology": topology,
         "degradation_count": degradation_count,
+        "consumed_tokens": result.get("consumed_tokens", 0),
+        "consumed_cost": result.get("consumed_cost", 0.0),
         "logs": result.get("logs", []),
     }
 

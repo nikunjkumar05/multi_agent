@@ -81,12 +81,8 @@ async def validate_result(state: AgentState) -> dict:
 
     response = await llm.ainvoke(messages)
 
-    budget = state.get("budget")
-    if budget:
-        budget.record_usage(
-            tokens=estimate_tokens(response),
-            cost=estimate_cost(response, tier),
-        )
+    val_tokens = estimate_tokens(response)
+    val_cost = estimate_cost(response, tier)
 
     content = _extract_text(response.content)
 
@@ -100,18 +96,24 @@ async def validate_result(state: AgentState) -> dict:
 
     task_id = state.get("task_id", "")
     budget = state.get("budget")
+    prev_tokens = state.get("consumed_tokens", 0)
+    prev_cost = state.get("consumed_cost", 0.0)
+    acc_tokens = prev_tokens + val_tokens
+    acc_cost = prev_cost + val_cost
     await emit_event(task_id, "validation_completed", {
         "confidence": confidence,
         "diverged": diverged,
-        "tokens_used": budget.consumed_tokens if budget else 0,
-        "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
-        "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+        "tokens_used": acc_tokens,
+        "cost_usd": round(acc_cost, 6),
+        "budget_spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
     })
 
     return {
         "validator_confidence": confidence,
         "reasoning_diverged": diverged,
         "status": "validating",
+        "consumed_tokens": acc_tokens,
+        "consumed_cost": acc_cost,
         "logs": [
             f"Validation: confidence={confidence:.2f}, diverged={diverged}"
         ],

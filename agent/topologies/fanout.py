@@ -52,6 +52,8 @@ def _make_worker_node(worker_name: str):
         llm = create_llm(tier)
 
         results = {}
+        worker_tokens = 0
+        worker_cost = 0.0
         for step in my_steps:
             messages = [
                 SystemMessage(content=WORKER_SYSTEM),
@@ -70,40 +72,39 @@ def _make_worker_node(worker_name: str):
                 if not output or not output.strip():
                     output = f"[Worker {worker_name} returned empty output for step {step['step_id']}]"
 
-                budget = state.get("budget")
-                if budget:
-                    try:
-                        budget.record_usage(
-                            tokens=estimate_tokens(response),
-                            cost=estimate_cost(response, tier),
-                        )
-                    except Exception:
-                        pass
+                step_tokens = estimate_tokens(response)
+                step_cost = estimate_cost(response, tier)
 
             except asyncio.TimeoutError:
                 log.warning("Worker %s timed out on step %s", worker_name, step["step_id"])
                 output = f"[Worker {worker_name} timed out on step {step['step_id']}]"
                 response = None
+                step_tokens = 0
+                step_cost = 0.0
             except Exception as e:
                 log.warning("Worker %s failed on step %s: %s", worker_name, step["step_id"], e)
                 output = f"[Worker {worker_name} failed on step {step['step_id']}: {e}]"
                 response = None
+                step_tokens = 0
+                step_cost = 0.0
 
             results[step["step_id"]] = output
+            worker_tokens += step_tokens
+            worker_cost += step_cost
 
-            budget = state.get("budget")
             await emit_event(task_id, "step_completed", {
                 "step_id": step["step_id"],
                 "worker": worker_name,
                 "result_preview": str(output)[:200],
-                "tokens_used": budget.consumed_tokens if budget else 0,
-                "cost_usd": round(budget.consumed_cost, 6) if budget else 0,
-                "budget_spent_pct": round(budget.spent_pct, 1) if budget else 0,
+                "tokens_used": worker_tokens,
+                "cost_usd": round(worker_cost, 6),
             })
 
         return {
             "step_results": results,
-            "logs": [f"{worker_name} completed {len(results)} steps"],
+            "consumed_tokens": worker_tokens,
+            "consumed_cost": worker_cost,
+            "logs": [f"Worker {worker_name} completed {len(results)} steps"],
         }
     return worker_node
 

@@ -4,19 +4,19 @@ from datetime import datetime, timezone
 import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+from core.config import DEFAULT_JWT_SECRET
 from core.events import EventBroadcaster
 from core.redis_client import get_redis
 
 router = APIRouter()
 
 _HEARTBEAT_INTERVAL = 20  # seconds
-_DEFAULT_SECRET = "change-me-in-production"
 
 
 def _validate_ws_token(token: str | None) -> bool:
     """Validate JWT token from query param. Returns True if valid or auth disabled."""
     from core.config import settings
-    if settings.jwt_secret == _DEFAULT_SECRET:
+    if settings.jwt_secret == DEFAULT_JWT_SECRET:
         return True
     if token is None:
         return False

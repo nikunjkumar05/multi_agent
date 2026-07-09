@@ -31,7 +31,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await rl._ensure_db()
 
     # Security warning for default JWT secret
-    if settings.jwt_secret == "change-me-in-production":
+    from core.config import DEFAULT_JWT_SECRET
+    if settings.jwt_secret == DEFAULT_JWT_SECRET:
         logger.warning(
             "SECURITY: jwt_secret is set to the default value. "
             "Authentication is effectively disabled. "

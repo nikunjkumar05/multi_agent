@@ -32,7 +32,8 @@ import jwt
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-_DEFAULT_SECRET = "change-me-in-production"
+from core.config import DEFAULT_JWT_SECRET
+
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -46,7 +47,7 @@ async def require_auth(
     from core.config import settings
 
     # Dev mode: skip auth when the secret has not been changed
-    if settings.jwt_secret == _DEFAULT_SECRET:
+    if settings.jwt_secret == DEFAULT_JWT_SECRET:
         return
 
     if credentials is None:

@@ -25,6 +25,35 @@ ENSEMBLE_TIERS = ["standard", "standard", "frontier"]
 _AGENT_TIMEOUT = 90  # hard timeout per agent (seconds)
 
 
+def ensemble_dispatcher(state: AgentState) -> dict:
+    """Pre-allocate budget per agent to prevent race condition.
+
+    Divides the remaining budget equally among agents and stores
+    per-agent cost caps. Each agent checks its cap before calling LLM,
+    so even if all agents read the same stale state, the pre-allocated
+    caps prevent collective overrun.
+    """
+    budget = state.get("budget")
+    acc_cost = state.get("consumed_cost", 0.0)
+    num_agents = len(ENSEMBLE_ROLES)
+
+    if not budget or budget.max_cost_usd <= 0:
+        return {"logs": ["Ensemble dispatcher: no budget, skipping allocation"]}
+
+    remaining = max(0.0, budget.max_cost_usd - acc_cost)
+    per_agent = remaining / num_agents
+
+    agent_caps = {}
+    for i in range(num_agents):
+        agent_key = chr(ord("a") + i)
+        agent_caps[agent_key] = round(acc_cost + per_agent, 6)
+
+    return {
+        "_agent_budget_caps": agent_caps,
+        "logs": [f"Ensemble dispatcher allocated ${per_agent:.6f} per agent ({num_agents} agents, ${remaining:.4f} remaining)"],
+    }
+
+
 def _agent_variant(system_prompt: str, role: str, agent_key: str):
     """Create an agent node variant for the ensemble."""
     async def agent_node(state: AgentState) -> dict:
@@ -40,9 +69,16 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
 
         budget = state.get("budget")
         acc_cost = state.get("consumed_cost", 0.0)
+
+        # Check pre-allocated per-agent cap (set by ensemble_dispatcher)
+        agent_caps = state.get("_agent_budget_caps", {})
+        agent_cap = agent_caps.get(agent_key)
+
         if budget and budget.max_cost_usd > 0:
             spent_pct = (acc_cost / budget.max_cost_usd) * 100
-            if spent_pct >= 100:
+
+            # Global threshold: skip if >=80% spent (prevents 3x race overrun)
+            if spent_pct >= 80:
                 await emit_event(task_id, "agent_skipped", {
                     "agent_key": agent_key,
                     "role": role,
@@ -53,6 +89,21 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
                     "consumed_tokens": 0,
                     "consumed_cost": 0,
                     "logs": [f"Agent {role} skipped - budget critical ({spent_pct:.0f}% spent)"],
+                }
+
+            # Per-agent cap: skip if this agent's share is exhausted
+            if agent_cap is not None and acc_cost >= agent_cap:
+                await emit_event(task_id, "agent_skipped", {
+                    "agent_key": agent_key,
+                    "role": role,
+                    "reason": "agent_cap_exceeded",
+                    "agent_cap": agent_cap,
+                    "spent_pct": round(spent_pct, 1),
+                })
+                return {
+                    "consumed_tokens": 0,
+                    "consumed_cost": 0,
+                    "logs": [f"Agent {role} skipped - per-agent cap ${agent_cap:.6f} reached ({spent_pct:.0f}% spent)"],
                 }
 
         llm = create_llm(tier)
@@ -124,6 +175,7 @@ def build_ensemble_graph() -> StateGraph:
     builder = StateGraph(AgentState)
 
     builder.add_node("planner", plan_task)
+    builder.add_node("ensemble_dispatcher", ensemble_dispatcher)
     for i, (prompt, role) in enumerate(zip(ENSEMBLE_PROMPTS, ENSEMBLE_ROLES)):
         agent_key = chr(ord("a") + i)
         builder.add_node(f"agent_{agent_key}", _agent_variant(prompt, role, agent_key))
@@ -134,9 +186,10 @@ def build_ensemble_graph() -> StateGraph:
     builder.add_node("finalizer", finalize_result)
 
     builder.add_edge(START, "planner")
-    builder.add_edge("planner", "agent_a")
-    builder.add_edge("planner", "agent_b")
-    builder.add_edge("planner", "agent_c")
+    builder.add_edge("planner", "ensemble_dispatcher")
+    builder.add_edge("ensemble_dispatcher", "agent_a")
+    builder.add_edge("ensemble_dispatcher", "agent_b")
+    builder.add_edge("ensemble_dispatcher", "agent_c")
     builder.add_edge("agent_a", "budget_gate")
     builder.add_edge("agent_b", "budget_gate")
     builder.add_edge("agent_c", "budget_gate")

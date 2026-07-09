@@ -36,15 +36,18 @@ def build_single_graph() -> StateGraph:
     builder = StateGraph(AgentState)
 
     builder.add_node("planner", plan_task)
+    builder.add_node("budget_gate_post_planner", budget_gate_node)
     builder.add_node("executor", execute_step)
     builder.add_node("budget_gate", budget_gate_node)
     builder.add_node("validator", validate_result)
     builder.add_node("escalation", check_escalation)
     builder.add_node("judge", ensemble_judge)
+    builder.add_node("budget_gate_post_judge", budget_gate_node)
     builder.add_node("finalizer", finalize_result)
 
     builder.add_edge(START, "planner")
-    builder.add_edge("planner", "executor")
+    builder.add_edge("planner", "budget_gate_post_planner")
+    builder.add_edge("budget_gate_post_planner", "executor")
     builder.add_edge("executor", "budget_gate")
     builder.add_edge("budget_gate", "validator")
     builder.add_conditional_edges(
@@ -64,7 +67,8 @@ def build_single_graph() -> StateGraph:
             "finalizer": "finalizer",
         },
     )
-    builder.add_edge("judge", "finalizer")
+    builder.add_edge("judge", "budget_gate_post_judge")
+    builder.add_edge("budget_gate_post_judge", "finalizer")
     builder.add_edge("finalizer", END)
 
     return builder

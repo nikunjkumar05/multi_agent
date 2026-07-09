@@ -137,6 +137,31 @@ async def execute_step(state: AgentState) -> dict:
         "description": step["description"],
     })
 
+    # Pre-LLM budget check — skip step if budget exhausted
+    from core.budget import should_skip_llm
+    if should_skip_llm(state):
+        budget = state.get("budget")
+        spent_pct = round(state.get("consumed_cost", 0.0) / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0
+        step["status"] = "completed"
+        step["result"] = "[Step skipped - budget exhausted]"
+        updated_steps = list(steps)
+        updated_steps[idx] = step
+        step_results[step["step_id"]] = step["result"]
+        await emit_event(task_id, "step_skipped", {
+            "step_id": step["step_id"],
+            "reason": "budget_exhausted",
+            "spent_pct": spent_pct,
+        })
+        return {
+            "steps": updated_steps,
+            "step_results": step_results,
+            "current_step_index": idx + 1,
+            "status": "executing",
+            "retry_count": 0,
+            "errors": [],
+            "logs": [f"Step {step['step_id']} skipped - budget exhausted"],
+        }
+
     tier = state["decision"].model_tiers.get("executor", "standard")
     llm = create_llm(tier)
 
@@ -188,14 +213,14 @@ async def execute_step(state: AgentState) -> dict:
 
         prev_tokens = state.get("consumed_tokens", 0)
         prev_cost = state.get("consumed_cost", 0.0)
-        acc_tokens = prev_tokens + exec_tokens
-        acc_cost = prev_cost + exec_cost
+        total_tokens = prev_tokens + exec_tokens
+        total_cost = prev_cost + exec_cost
         budget = state.get("budget")
 
         # Check if step exceeded its budget cap
         step_budget_caps = state.get("step_budget_caps", {})
         step_cap = step_budget_caps.get(str(step["step_id"]))
-        if step_cap is not None and acc_cost >= step_cap:
+        if step_cap is not None and total_cost >= step_cap:
             step["status"] = "completed"
             step["result"] = output[:500] + "\n[Truncated - step budget cap exceeded]" if len(str(output)) > 500 else output
             step["truncated"] = True
@@ -205,7 +230,7 @@ async def execute_step(state: AgentState) -> dict:
             await emit_event(task_id, "step_truncated", {
                 "step_id": step["step_id"],
                 "reason": "budget_cap_exceeded",
-                "spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
+                "spent_pct": round(total_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
             })
             return {
                 "steps": updated_steps,
@@ -214,8 +239,8 @@ async def execute_step(state: AgentState) -> dict:
                 "status": "executing",
                 "retry_count": 0,
                 "errors": [],
-                "consumed_tokens": acc_tokens,
-                "consumed_cost": acc_cost,
+                "consumed_tokens": exec_tokens,
+                "consumed_cost": exec_cost,
                 "logs": [f"Step {step['step_id']} truncated - step budget cap exceeded"],
             }
 
@@ -230,9 +255,9 @@ async def execute_step(state: AgentState) -> dict:
         await emit_event(task_id, "step_completed", {
             "step_id": step["step_id"],
             "result_preview": str(output)[:200],
-            "tokens_used": acc_tokens,
-            "cost_usd": round(acc_cost, 6),
-            "budget_spent_pct": round(acc_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
+            "tokens_used": total_tokens,
+            "cost_usd": round(total_cost, 6),
+            "budget_spent_pct": round(total_cost / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0,
         })
 
         return {
@@ -242,8 +267,8 @@ async def execute_step(state: AgentState) -> dict:
             "status": "executing",
             "retry_count": 0,
             "errors": [],
-            "consumed_tokens": acc_tokens,
-            "consumed_cost": acc_cost,
+            "consumed_tokens": exec_tokens,
+            "consumed_cost": exec_cost,
             "logs": [f"Completed step {step['step_id']}"],
         }
 

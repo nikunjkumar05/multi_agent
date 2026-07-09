@@ -82,6 +82,7 @@ class AgentState(TypedDict, total=False):
     agent_a_result: dict | None
     agent_b_result: dict | None
     agent_c_result: dict | None
+    _agent_budget_caps: dict[str, float] | None
 
     # Supervisor-specific (optional)
     supervisor_remaining_tasks: list[str] | None

@@ -74,3 +74,21 @@ class BudgetTracker:
             "single": "single",
         }
         return degradation_map.get(current_topology, "single")
+
+
+def should_skip_llm(state: dict, threshold: float = 0.9) -> bool:
+    """Check if budget is too low to make an LLM call.
+
+    Args:
+        state: Current graph state with 'budget' and 'consumed_cost'.
+        threshold: Skip if spent_pct >= threshold (default 0.9 = 90%).
+
+    Returns:
+        True if LLM call should be skipped (budget exhausted).
+    """
+    budget = state.get("budget")
+    if not budget or budget.max_cost_usd <= 0:
+        return False
+    acc_cost = state.get("consumed_cost", 0.0)
+    spent_pct = acc_cost / budget.max_cost_usd
+    return spent_pct >= threshold

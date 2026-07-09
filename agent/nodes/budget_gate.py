@@ -20,6 +20,7 @@ from core.budget import BudgetBand, BudgetTracker
 from core.node_events import emit_event
 
 TOPOLOGY_DEGRADATION_CHAIN = ["ensemble", "fanout", "supervisor", "pipeline", "single"]
+HARD_CAP_MULTIPLIER = 1.1  # Circuit breaker triggers at 110% of budget
 
 
 class BudgetGateAction(str, Enum):
@@ -36,6 +37,17 @@ def _next_topology(current: str) -> str:
         return TOPOLOGY_DEGRADATION_CHAIN[min(idx + 1, len(TOPOLOGY_DEGRADATION_CHAIN) - 1)]
     except ValueError:
         return "single"
+
+
+def _spent_band(spent_pct: float) -> str:
+    """Return the budget band name for a given spent percentage."""
+    if spent_pct < 70:
+        return "healthy"
+    if spent_pct < 90:
+        return "tier_downgrade"
+    if spent_pct < 100:
+        return "structural_degrade"
+    return "critical"
 
 
 def evaluate_gate(state: dict) -> BudgetGateAction:
@@ -73,21 +85,54 @@ async def budget_gate_node(state: dict) -> dict:
     """
     LangGraph node: evaluate budget gate and interrupt if needed.
     Fires at synchronization barriers after LLM-invoking nodes.
+    Syncs BudgetTracker with live consumed_cost/consumed_tokens so that
+    budget_interrupt.py and other consumers see correct band state.
+    Includes hard circuit breaker at 110% of budget.
     """
     from langgraph.types import interrupt
+
+    # Sync BudgetTracker with live state values (fixes stale band detection)
+    budget: BudgetTracker | None = state.get("budget")
+    acc_cost = state.get("consumed_cost", 0.0)
+    acc_tokens = state.get("consumed_tokens", 0)
+    if budget is not None:
+        budget.consumed_cost = acc_cost
+        budget.consumed_tokens = acc_tokens
+
+    # Hard circuit breaker: force stop if cost exceeds 110% of budget
+    if budget and budget.max_cost_usd > 0 and acc_cost >= budget.max_cost_usd * HARD_CAP_MULTIPLIER:
+        task_id = state.get("task_id", "")
+        spent_pct = round(acc_cost / budget.max_cost_usd * 100, 1)
+        await emit_event(task_id, "budget_circuit_breaker", {
+            "consumed_cost": round(acc_cost, 6),
+            "hard_cap": round(budget.max_cost_usd * HARD_CAP_MULTIPLIER, 6),
+            "spent_pct": spent_pct,
+            "message": f"Circuit breaker: {spent_pct}% spent exceeds {HARD_CAP_MULTIPLIER*100:.0f}% hard cap — forcing emergency stop",
+        })
+        audit = get_audit_trail()
+        audit.record_budget_band(
+            task_id=task_id,
+            band="critical",
+            remaining_budget=0,
+            action=f"CIRCUIT BREAKER: cost ${acc_cost:.6f} exceeds hard cap ${budget.max_cost_usd * HARD_CAP_MULTIPLIER:.6f} — forcing stop",
+        )
+        interrupt({
+            "reason": "circuit_breaker",
+            "consumed_cost": acc_cost,
+            "hard_cap": budget.max_cost_usd * HARD_CAP_MULTIPLIER,
+        })
+        return {"budget": budget}  # unreachable — interrupt() raises
 
     action = evaluate_gate(state)
 
     if action == BudgetGateAction.CONTINUE:
-        return {}
+        return {"budget": budget}
+
 
     task_id = state.get("task_id", "")
     topology = state.get("topology", "single")
-    budget: BudgetTracker | None = state.get("budget")
-    acc_cost = state.get("consumed_cost", 0.0)
-    acc_tokens = state.get("consumed_tokens", 0)
     spent_pct = (acc_cost / budget.max_cost_usd * 100) if budget and budget.max_cost_usd > 0 else 0.0
-    band = "healthy" if spent_pct < 70 else "tier_downgrade" if spent_pct < 90 else "structural_degrade" if spent_pct < 100 else "critical"
+    band = _spent_band(spent_pct)
 
     if action == BudgetGateAction.PAUSE:
         to_topology = _next_topology(topology)
@@ -161,6 +206,6 @@ async def budget_gate_node(state: dict) -> dict:
                 "spent_pct": round(spent_pct, 1),
             },
         )
-        return {"skip_judge": True}
+        return {"skip_judge": True, "budget": budget}
 
-    return {}
+    return {"budget": budget}

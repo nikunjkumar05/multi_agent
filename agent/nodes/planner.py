@@ -90,6 +90,26 @@ async def plan_task(state: AgentState) -> dict:
     task_id = state.get("task_id", "")
     await emit_event(task_id, "planner_started", {"task": state["task"]})
 
+    # Pre-LLM budget check — skip planning if budget exhausted
+    from core.budget import should_skip_llm
+    if should_skip_llm(state):
+        budget = state.get("budget")
+        spent_pct = round(state.get("consumed_cost", 0.0) / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0
+        fallback_step = PlanStep(step_id=1, description=state["task"], status="pending", result=None, error=None)
+        await emit_event(task_id, "planner_skipped", {
+            "reason": "budget_exhausted",
+            "spent_pct": spent_pct,
+        })
+        return {
+            "steps": [fallback_step],
+            "current_step_index": 0,
+            "status": "planning",
+            "retry_count": 0,
+            "consumed_tokens": 0,
+            "consumed_cost": 0.0,
+            "logs": [f"Planner skipped - budget exhausted ({spent_pct}% spent), using single-step fallback"],
+        }
+
     step_count = analyze_task_complexity(state["task"])
 
     tier = state["decision"].model_tiers.get("planner", "standard")
@@ -173,8 +193,8 @@ async def plan_task(state: AgentState) -> dict:
         "current_step_index": 0,
         "status": "planning",
         "retry_count": 0,
-        "consumed_tokens": acc_tokens,
-        "consumed_cost": acc_cost,
+        "consumed_tokens": local_tokens,
+        "consumed_cost": local_cost,
         "step_budget_caps": step_budget_caps,
         "logs": [f"Planned {len(steps)} steps (complexity={step_count})"],
     }

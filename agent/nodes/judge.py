@@ -147,7 +147,7 @@ async def ensemble_judge(state: AgentState) -> dict:
         "final_output": judge_output,
         "final_result": judge_output,
         "status": "completed",
-        "consumed_tokens": acc_tokens,
-        "consumed_cost": acc_cost,
+        "consumed_tokens": judge_tokens,
+        "consumed_cost": judge_cost,
         "logs": ["Judge produced final result"],
     }

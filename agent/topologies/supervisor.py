@@ -36,6 +36,19 @@ async def supervisor_node(state: AgentState) -> dict:
     if not pending:
         return {"status": "completed"}
 
+    # Pre-LLM budget check — skip supervisor if budget exhausted
+    from core.budget import should_skip_llm
+    if should_skip_llm(state):
+        budget = state.get("budget")
+        spent_pct = round(state.get("consumed_cost", 0.0) / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0
+        task_id = state.get("task_id", "")
+        await emit_event(task_id, "supervisor_skipped", {
+            "reason": "budget_exhausted",
+            "spent_pct": spent_pct,
+            "pending_steps": len(pending),
+        })
+        return {"status": "completed", "logs": [f"Supervisor skipped - budget exhausted ({spent_pct}% spent), {len(pending)} steps abandoned"]}
+
     tier = state["decision"].model_tiers.get("planner", "standard")
     llm = create_llm(tier)
 
@@ -81,7 +94,7 @@ async def supervisor_node(state: AgentState) -> dict:
         target_idx = next((i for i, s in enumerate(steps) if s["status"] == "pending"), idx)
     else:
         target_idx = match
-    return {"current_step_index": target_idx, "status": "executing", "consumed_tokens": acc_tokens, "consumed_cost": acc_cost}
+    return {"current_step_index": target_idx, "status": "executing", "consumed_tokens": sup_tokens, "consumed_cost": sup_cost}
 
 
 def _route_after_supervisor(state: AgentState) -> Literal["executor", "judge", "finalizer"]:
@@ -97,24 +110,30 @@ def _route_after_supervisor(state: AgentState) -> Literal["executor", "judge", "
 def build_supervisor_graph() -> StateGraph:
     builder = StateGraph(AgentState)
     builder.add_node("planner", plan_task)
+    builder.add_node("budget_gate_post_planner", budget_gate_node)
     builder.add_node("supervisor", supervisor_node)
+    builder.add_node("budget_gate_post_supervisor", budget_gate_node)
     builder.add_node("executor", execute_step)
     builder.add_node("budget_gate", budget_gate_node)
     builder.add_node("validator", validate_result)
     builder.add_node("judge", ensemble_judge)
+    builder.add_node("budget_gate_post_judge", budget_gate_node)
     builder.add_node("finalizer", finalize_result)
 
     builder.add_edge(START, "planner")
-    builder.add_edge("planner", "supervisor")
+    builder.add_edge("planner", "budget_gate_post_planner")
+    builder.add_edge("budget_gate_post_planner", "supervisor")
     builder.add_conditional_edges(
         "supervisor",
         _route_after_supervisor,
-        {"executor": "executor", "judge": "judge", "finalizer": "finalizer"},
+        {"executor": "budget_gate_post_supervisor", "judge": "judge", "finalizer": "finalizer"},
     )
+    builder.add_edge("budget_gate_post_supervisor", "executor")
     builder.add_edge("executor", "budget_gate")
     builder.add_edge("budget_gate", "validator")
     builder.add_edge("validator", "supervisor")
-    builder.add_edge("judge", "finalizer")
+    builder.add_edge("judge", "budget_gate_post_judge")
+    builder.add_edge("budget_gate_post_judge", "finalizer")
     builder.add_edge("finalizer", END)
 
     return builder

@@ -121,6 +121,8 @@ async def parallel_workers_node(state: AgentState) -> dict:
     merged_step_results = {}
     merged_logs = []
     fanout_worker_results = []
+    merged_tokens = 0
+    merged_cost = 0.0
     for i, r in enumerate(results):
         worker_name = list(assignments.keys())[i] if i < len(assignments) else f"worker_{i}"
         if isinstance(r, Exception):
@@ -129,6 +131,8 @@ async def parallel_workers_node(state: AgentState) -> dict:
             continue
         merged_step_results.update(r.get("step_results", {}))
         merged_logs.extend(r.get("logs", []))
+        merged_tokens += r.get("consumed_tokens", 0)
+        merged_cost += r.get("consumed_cost", 0.0)
         fanout_worker_results.append({
             "worker": worker_name,
             "steps": list(r.get("step_results", {}).keys()),
@@ -138,6 +142,8 @@ async def parallel_workers_node(state: AgentState) -> dict:
     return {
         "step_results": merged_step_results,
         "fanout_worker_results": fanout_worker_results,
+        "consumed_tokens": merged_tokens,
+        "consumed_cost": merged_cost,
         "logs": merged_logs,
     }
 
@@ -158,6 +164,7 @@ def aggregator_node(state: AgentState) -> dict:
 def build_fanout_graph() -> StateGraph:
     builder = StateGraph(AgentState)
     builder.add_node("planner", plan_task)
+    builder.add_node("budget_gate_post_planner", budget_gate_node)
     builder.add_node("dispatcher", dispatcher_node)
     builder.add_node("parallel_workers", parallel_workers_node)
     builder.add_node("budget_gate", budget_gate_node)
@@ -166,7 +173,8 @@ def build_fanout_graph() -> StateGraph:
     builder.add_node("budget_gate_post_judge", budget_gate_node)
 
     builder.add_edge(START, "planner")
-    builder.add_edge("planner", "dispatcher")
+    builder.add_edge("planner", "budget_gate_post_planner")
+    builder.add_edge("budget_gate_post_planner", "dispatcher")
     builder.add_edge("dispatcher", "parallel_workers")
     builder.add_edge("parallel_workers", "budget_gate")
     builder.add_edge("budget_gate", "aggregator")

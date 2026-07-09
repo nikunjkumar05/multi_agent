@@ -12,7 +12,9 @@
 5. [Suggested Changes to commercialization_roadmap.md](#5-suggested-changes-to-commercialization_roadmapmd)
 6. [Concrete Code Improvements](#6-concrete-code-improvements)
 7. [Phased Implementation Roadmap](#7-phased-implementation-roadmap)
-8. [Future Research Directions](#8-future-research-directions)
+8. [Summary: Top 5 Next Priorities](#summary-top-5-next-priorities)
+9. [Budget Hardening (P1–P7)](#9-budget-hardening-p1p7)
+10. [Future Research Directions](#10-future-research-directions)
 
 ---
 
@@ -92,12 +94,9 @@ These are inconsistencies or gaps found by cross-referencing `docs/plan.md`, `fe
 
 `core/rl_policy.py` initialises from the plan description with a threshold of 5 for selection and uses separate logic for overriding. The documentation is inconsistent. **Fix**: make `RL_MIN_TASKS_FOR_OVERRIDE` a configurable setting in `core/config.py` and document the actual value.
 
-### 3.2 Pre-Execution Only — Not Mid-Execution
+### 3.2 ~~Pre-Execution Only — Not Mid-Execution~~ `[CLOSED]`
 
-`docs/plan.md` correctly notes:
-> *"Degradation happens pre-execution (before graph invocation), not mid-execution."*
-
-But `commercialization_roadmap.md` lists **mid-execution checkpointing** as a needed feature, and it is marked `Missing` in `feature_comparison.md`. This is the single highest-value engineering gap. The fix is described in Section 6.1 below.
+> **Resolution**: Implemented in P4–P7 (commit `19f1b6c`). Budget gates now fire at every synchronization barrier — post-planner, post-executor, post-supervisor, and post-judge — across all 5 topologies. Mid-execution degradation via `langgraph.types.interrupt()` is fully operational.
 
 ### 3.3 stats.py and learning.py (V3) Are Mentioned but Missing
 
@@ -107,19 +106,17 @@ But `commercialization_roadmap.md` lists **mid-execution checkpointing** as a ne
 
 Neither file exists. The RL policy (`core/rl_policy.py`) partially covers `stats.py` functionality but lacks the Judge-score feedback loop. These should be scaffolded now, even if empty, so the architecture is complete.
 
-### 3.4 JWT Config Present, Not Integrated
+### 3.4 ~~JWT Config Present, Not Integrated~~ `[CLOSED]`
 
-`feature_comparison.md` notes: *"JWT secret in config — Implemented. OAuth2/JWT authentication — Missing."*
+> **Resolution**: JWT auth wired to all routes (`api/routes/auth.py`), WebSocket uses `?token=` query param (`api/websocket.py`). `DEFAULT_JWT_SECRET` extracted to `core/config.py` as single source of truth.
 
-`core/config.py` has a `JWT_SECRET` setting that is never used in `api/`. The field should either be wired up or removed to avoid confusion.
+### 3.5 ~~WebSocket Heartbeat Missing~~ `[CLOSED]`
 
-### 3.5 WebSocket Heartbeat Missing
+> **Resolution**: 20s heartbeat/ping implemented in `api/websocket.py`. Prevents reverse proxy idle timeout disconnections.
 
-The WebSocket at `/ws/{task_id}` subscribes to Redis pub/sub and streams events. There is no heartbeat/ping mechanism. Long-running tasks (>30s) will silently disconnect on most reverse proxies (nginx default: 60s idle timeout). This needs a periodic `ping` frame.
+### 3.6 ~~Audit Trail in Memory Only~~ `[CLOSED]`
 
-### 3.6 Audit Trail in Memory Only
-
-`core/audit.py` is an in-memory singleton. On process restart all audit data is lost. For any commercial use, audit must be persisted (SQLite as a minimum, PostgreSQL for production).
+> **Resolution**: SQLite persistence via `aiosqlite` with in-memory fast path. `core/audit.py` implements `AuditTrail` class with DB fallback. Indexed by `task_id`. Survives process restarts.
 
 ---
 
@@ -237,139 +234,30 @@ This is a rare and strong differentiator — most competing repos have no peer-r
 
 ## 6. Concrete Code Improvements
 
-### 6.1 Mid-Execution Budget Enforcement (Highest Priority)
+### 6.1 ~~Mid-Execution Budget Enforcement (Highest Priority)~~ `✅ IMPLEMENTED`
 
-**Current state**: `core/degrader.py` degrades topology *before* `compile_graph()` is called.
-**Needed**: A graph interrupt that checks the budget after each node completes and re-routes if a budget band is crossed mid-execution.
-
-**Implementation sketch** (`core/budget_interrupt.py`):
-
-```python
-"""
-Mid-execution budget checkpoint injected as a LangGraph node.
-Placed after each major node (Executor, Validator) in the graph.
-"""
-from core.budget import BudgetTracker, BudgetBand
-from core.degrader import degrade_topology
-from core.events import EventBroadcaster
-from agent.state import AgentState
-
-async def budget_checkpoint(state: AgentState) -> dict:
-    """
-    Checks the current budget band after each node.
-    If the band has worsened since the last check, emits a degradation event
-    and updates the state's effective topology for remaining steps.
-    """
-    tracker: BudgetTracker = state["budget_tracker"]
-    current_band = tracker.get_band()
-    previous_band = state.get("last_budget_band", BudgetBand.HEALTHY)
-
-    if current_band.value > previous_band.value:
-        # Band has worsened — degrade the remaining topology
-        new_topology = degrade_topology(tracker, state["topology"])
-        await EventBroadcaster.emit(state["task_id"], "budget_degradation", {
-            "from_band": previous_band.name,
-            "to_band": current_band.name,
-            "from_topology": state["topology"],
-            "to_topology": new_topology,
-        })
-        return {
-            "topology": new_topology,
-            "last_budget_band": current_band,
-        }
-
-    return {"last_budget_band": current_band}
-```
-
-Wire into `agent/topologies/builder.py`:
-
-```python
-# In compile_graph(), after adding executor node:
-graph.add_node("budget_checkpoint", budget_checkpoint)
-graph.add_edge("executor", "budget_checkpoint")
-graph.add_edge("budget_checkpoint", "validator")
-```
-
-This requires adding `last_budget_band` and `budget_tracker` to `AgentState`.
+> **Status**: Implemented in P4–P7 (commit `19f1b6c`). See Section 9 for full details.
+>
+> Budget gates now fire at every synchronization barrier across all topologies:
+> - **Post-planner**: Catches budget exhaustion before any execution starts
+> - **Post-executor**: Existing gate, now returns delta-only values (P1 fix)
+> - **Post-supervisor**: Catches budget exhaustion between supervisor dispatches
+> - **Post-judge**: Catches budget exhaustion after judge LLM call
+>
+> Circuit breaker at 110% provides last-resort hard stop.
+> Pre-LLM checks in executor/planner/supervisor skip calls entirely when budget exhausted.
 
 ---
 
-### 6.2 Persistent Audit Trail (core/audit.py)
+### 6.2 ~~Persistent Audit Trail (core/audit.py)~~ `✅ IMPLEMENTED`
 
-Replace the in-memory singleton with SQLite (zero-dependency, already in `requirements.txt` via `aiosqlite`):
-
-```python
-# core/audit.py — replace AuditTrail singleton with async SQLite persistence
-
-import aiosqlite
-from datetime import datetime
-from pathlib import Path
-
-DB_PATH = Path("./workspace/audit.db")
-
-async def init_audit_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS audit_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                timestamp TEXT NOT NULL
-            )
-        """)
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_task_id ON audit_events(task_id)")
-        await db.commit()
-
-async def record_event(task_id: str, event_type: str, payload: dict):
-    import orjson
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO audit_events (task_id, event_type, payload, timestamp) VALUES (?, ?, ?, ?)",
-            (task_id, event_type, orjson.dumps(payload).decode(), datetime.utcnow().isoformat())
-        )
-        await db.commit()
-
-async def get_audit_trail(task_id: str) -> list[dict]:
-    import orjson
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT event_type, payload, timestamp FROM audit_events WHERE task_id = ? ORDER BY id",
-            (task_id,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [{"event_type": r[0], "payload": orjson.loads(r[1]), "timestamp": r[2]} for r in rows]
-```
-
-Call `await init_audit_db()` in the FastAPI lifespan function (`api/main.py`).
+> **Status**: Implemented. `core/audit.py` uses SQLite via `aiosqlite` with in-memory fast path. DB initialized on startup. Indexed by `task_id`. Survives process restarts.
 
 ---
 
-### 6.3 WebSocket Heartbeat (api/websocket.py)
+### 6.3 ~~WebSocket Heartbeat (api/websocket.py)~~ `✅ IMPLEMENTED`
 
-```python
-import asyncio
-from fastapi import WebSocket
-
-async def websocket_endpoint(websocket: WebSocket, task_id: str):
-    await websocket.accept()
-    
-    async def heartbeat():
-        while True:
-            await asyncio.sleep(20)
-            try:
-                await websocket.send_json({"type": "ping"})
-            except Exception:
-                break
-    
-    heartbeat_task = asyncio.create_task(heartbeat())
-    try:
-        # ... existing Redis pub/sub subscription logic ...
-        pass
-    finally:
-        heartbeat_task.cancel()
-        await websocket.close()
-```
+> **Status**: Implemented. 20s heartbeat/ping in `api/websocket.py`. Prevents reverse proxy idle timeout.
 
 ---
 
@@ -463,79 +351,21 @@ async def record_task_result(
 
 ---
 
-### 6.5 Make RL Thresholds Configurable (core/config.py)
+### 6.5 ~~Make RL Thresholds Configurable (core/config.py)~~ `✅ IMPLEMENTED`
 
-Add to `Settings`:
-
-```python
-# RL Policy tuning
-RL_MIN_TASKS_FOR_SELECTION: int = 5    # Tasks before RL starts suggesting
-RL_MIN_TASKS_FOR_OVERRIDE: int = 10   # Tasks before RL can override LLM decision
-RL_QUALITY_WEIGHT: float = 0.7        # Weight of quality score in reward
-RL_COST_EFFICIENCY_WEIGHT: float = 0.3  # Weight of cost efficiency in reward
-```
+> **Status**: Implemented. `core/config.py` has `RL_MIN_TASKS_FOR_SELECTION`, `RL_MIN_TASKS_FOR_OVERRIDE`, `RL_QUALITY_WEIGHT`, `RL_COST_EFFICIENCY_WEIGHT` as configurable settings.
 
 ---
 
-### 6.6 JWT Authentication (Minimal, Wire It Up)
+### 6.6 ~~JWT Authentication (Minimal, Wire It Up)~~ `✅ IMPLEMENTED`
 
-`core/config.py` already has `JWT_SECRET`. Wire it into a simple API key middleware:
-
-```python
-# api/middleware/auth.py
-from fastapi import HTTPException, Security, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
-
-security = HTTPBearer(auto_error=False)
-
-async def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
-    from core.config import settings
-    if not settings.JWT_SECRET:
-        return  # Auth disabled in development
-    if not credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
-    try:
-        jwt.decode(credentials.credentials, settings.JWT_SECRET, algorithms=["HS256"])
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-```
-
-Add to `api/routes/execute.py`:
-
-```python
-from api.middleware.auth import verify_token
-
-@router.post("/execute", dependencies=[Depends(verify_token)])
-async def execute_task(...):
-    ...
-```
-
-Add `PyJWT` to `requirements.txt`.
+> **Status**: Implemented. JWT auth via `api/routes/auth.py` (Bearer token), `api/websocket.py` (?token= query param). `DEFAULT_JWT_SECRET` in `core/config.py`. Dev-mode bypass when default secret is in use.
 
 ---
 
-### 6.7 Dry-Run / Cost Estimation Endpoint
+### 6.7 ~~Dry-Run / Cost Estimation Endpoint~~ `✅ IMPLEMENTED`
 
-Add `POST /estimate` that runs only the optimizer (no graph execution) and returns a cost estimate:
-
-```python
-# api/routes/estimate.py
-@router.post("/estimate")
-async def estimate_task(request: ExecuteRequest):
-    decision = await optimizer.optimize(request.task, request.budget_usd, request.topology)
-    estimated_cost = _estimate_cost(decision.topology, decision.model_tiers)
-    return {
-        "topology": decision.topology,
-        "model_tiers": decision.model_tiers,
-        "rationale": decision.rationale,
-        "estimated_cost_usd": estimated_cost,
-        "budget_usd": request.budget_usd,
-        "budget_headroom_pct": max(0, 100 * (1 - estimated_cost / request.budget_usd)),
-    }
-```
-
-This powers the CLI tool and is a critical developer UX feature.
+> **Status**: Implemented as `POST /estimate` in `api/routes/estimate.py`. Returns topology, model tiers, estimated cost, budget headroom, and risk level (LOW/MEDIUM/HIGH). Powers the frontend cost estimation banner.
 
 ---
 
@@ -615,14 +445,15 @@ gantt
 
 **Goal**: Make the existing system production-safe with zero external dependencies added.
 
-| Task | File(s) | Effort | Impact |
-|---|---|---|---|
-| Mid-execution budget checkpoint | `core/budget_interrupt.py`, `agent/topologies/builder.py`, `agent/state.py` | 3d | ★★★★★ |
-| Persistent audit trail (SQLite) | `core/audit.py` | 1d | ★★★★ |
-| WebSocket heartbeat | `api/websocket.py` | 0.5d | ★★★ |
-| Scaffold stats.py + learning.py | `core/stats.py`, `core/learning.py` | 1d | ★★★ |
-| RL config externalisation | `core/config.py`, `core/rl_policy.py` | 0.5d | ★★ |
-| POST /estimate endpoint | `api/routes/estimate.py`, `api/main.py` | 1d | ★★★★ |
+| Task | File(s) | Effort | Impact | Status |
+|---|---|---|---|---|
+| ~~Mid-execution budget checkpoint~~ | `agent/nodes/budget_gate.py`, topology files, `agent/state.py` | 3d | ★★★★★ | ✅ **Done** (P4–P7, commit `19f1b6c`) |
+| ~~Persistent audit trail (SQLite)~~ | `core/audit.py` | 1d | ★★★★ | ✅ **Done** |
+| ~~WebSocket heartbeat~~ | `api/websocket.py` | 0.5d | ★★★ | ✅ **Done** |
+| ~~Scaffold stats.py + learning.py~~ | `core/stats.py`, `core/learning.py` | 1d | ★★★ | ✅ **Done** |
+| ~~RL config externalisation~~ | `core/config.py`, `core/rl_policy.py` | 0.5d | ★★ | ✅ **Done** |
+| ~~POST /estimate endpoint~~ | `api/routes/estimate.py`, `api/main.py` | 1d | ★★★★ | ✅ **Done** |
+| Budget hardening (P1–P7) | 12 files | 2d | ★★★★★ | ✅ **Done** (commit `19f1b6c`) |
 
 ### Phase 2 — Developer Tools (Weeks 5–7)
 
@@ -659,43 +490,166 @@ gantt
 
 ---
 
-## 8. Future Research Directions
+## 9. Budget Hardening (P1–P7)
 
-### 8.1 Online ILP (Restore Paper Fidelity)
+*Implemented: 2026-07-09 | Commit: `19f1b6c` | 12 files, +235/-38 lines*
+
+### 9.1 Overview
+
+Seven phases of production-grade budget enforcement, addressing bugs found by deep audit and code review. These changes transform the budget system from "mostly works" to "production-hardened with multiple safety nets."
+
+### 9.2 Changes by Phase
+
+| Phase | Fix | Files | Impact |
+|-------|-----|-------|--------|
+| **P1** | Double-counting: return delta, not `prev+delta` | 5 node files | Stops silent cost inflation at source |
+| **P2** | Fanout cost tracking: aggregate worker deltas | `fanout.py` | Recovers lost cost data |
+| **P3** | Ensemble race: dispatcher pre-allocates per-agent caps | `ensemble.py`, `state.py` | Prevents 3x race overrun |
+| **P4** | Missing gates: post-planner, post-supervisor, post-judge | 4 topology files | Catches budget breaches at every sync point |
+| **P5** | BudgetTracker sync: gate writes live values to tracker | `budget_gate.py` | Makes band detection work |
+| **P6** | Pre-LLM checks: skip LLM call if budget exhausted | `budget.py`, 3 node files | Prevents wasting tokens on nodes that would be degraded |
+| **P7** | Circuit breaker: 110% hard cap forces emergency stop | `budget_gate.py` | Last-resort safety net |
+
+### 9.3 Detailed Technical Changes
+
+#### P1: Double-Counting Fix
+
+**Bug**: `consumed_tokens` and `consumed_cost` use `Annotated[type, operator.add]` as reducer. Sequential nodes returned `prev + delta` instead of `delta`, causing the reducer to compute `prev + (prev + delta)` — inflating costs on every node call.
+
+**Fix**: All nodes return only their local delta:
+- `executor.py`: `exec_tokens`/`exec_cost` (was `acc_tokens`/`acc_cost`)
+- `validator.py`: `val_tokens`/`val_cost`
+- `judge.py`: `judge_tokens`/`judge_cost`
+- `supervisor.py`: `sup_tokens`/`sup_cost`
+- `planner.py`: `local_tokens`/`local_cost`
+
+#### P2: Fanout Cost Tracking
+
+**Bug**: `parallel_workers_node` collected `step_results` and `logs` from workers but dropped `consumed_tokens`/`consumed_cost`.
+
+**Fix**: Added `merged_tokens`/`merged_cost` accumulators that sum each worker's deltas.
+
+#### P3: Ensemble Race Condition
+
+**Bug**: Three parallel agents read the same stale `consumed_cost` and all proceeded — combined cost could exceed budget 3x before the gate fired.
+
+**Fix**: New `ensemble_dispatcher` node divides remaining budget equally among agents. Each agent checks its pre-allocated cap before calling LLM. Global threshold lowered from 100% → 80%.
+
+#### P4: Missing Budget Gates
+
+**Bug**: No gate after planner, supervisor, or judge in most topologies.
+
+**Fix**: Added `budget_gate_post_planner`, `budget_gate_post_supervisor`, `budget_gate_post_judge` nodes:
+
+| Topology | Gates Added |
+|----------|-------------|
+| Single | post-planner, post-judge |
+| Pipeline | post-planner, post-judge |
+| Supervisor | post-planner, post-supervisor, post-judge |
+| Fanout | post-planner |
+| Ensemble | (already had full coverage) |
+
+#### P5: BudgetTracker Sync
+
+**Bug**: `BudgetTracker.consumed_cost` was never synced with `state.consumed_cost`. The `budget_checkpoint` node in `budget_interrupt.py` always returned HEALTHY.
+
+**Fix**: `budget_gate_node` now writes `budget.consumed_cost = acc_cost` and `budget.consumed_tokens = acc_tokens` at every gate evaluation, before returning `{"budget": budget}`.
+
+#### P6: Pre-LLM Budget Checks
+
+**Bug**: Executor, planner, and supervisor called LLM without checking budget first. Tokens were wasted on nodes that would be degraded by the gate.
+
+**Fix**: New `should_skip_llm(state, threshold=0.9)` utility in `core/budget.py`. Called before every LLM invocation:
+- Executor: skips step, returns "[Step skipped - budget exhausted]"
+- Planner: returns single-step fallback with 0 cost
+- Supervisor: returns `{"status": "completed"}`, stops execution
+
+#### P7: Hard Circuit Breaker
+
+**Bug**: If all gates failed, no last-resort safety net existed.
+
+**Fix**: `HARD_CAP_MULTIPLIER = 1.1` constant. If `consumed_cost >= budget.max_cost_usd * 1.1`, `budget_gate_node` emits `budget_circuit_breaker` event, records in audit trail, and calls `interrupt()` to force-stop.
+
+### 9.4 Code Review Fixes
+
+Applied during review of P1–P7:
+
+| Issue | Severity | Fix |
+|-------|----------|-----|
+| Executor truncated-step return outside `if` block | Critical | Restored correct indentation (12 spaces) |
+| Ensemble dispatcher stored `per_agent` instead of `acc_cost + per_agent` | Critical | Agents would never run — fixed cap calculation |
+| `acc_tokens`/`acc_cost` naming ambiguous | Suggestion | Renamed to `total_tokens`/`total_cost` in executor |
+| Inline band computation hard to maintain | Suggestion | Extracted `_spent_band()` helper |
+| Supervisor skip event missing step count | Suggestion | Added `pending_steps` to event payload |
+| Missing trailing newlines | Nitpick | Added to `budget.py`, `budget_gate.py` |
+
+### 9.5 Budget Enforcement Layers (Post P1–P7)
+
+The system now has **12 distinct budget enforcement mechanisms**:
+
+```
+Layer 1: Pre-execution degradation (core/degrader.py)
+Layer 2: Pre-LLM budget check (should_skip_llm in executor/planner/supervisor)
+Layer 3: Per-step budget caps (planner → executor)
+Layer 4: Post-planner budget gate
+Layer 5: Post-executor budget gate
+Layer 6: Post-supervisor budget gate (supervisor topology)
+Layer 7: Post-judge budget gate
+Layer 8: Ensemble per-agent budget caps (dispatcher)
+Layer 9: Ensemble global 80% threshold
+Layer 10: BudgetTracker sync (band detection)
+Layer 11: Circuit breaker at 110%
+Layer 12: Orchestrator degradation chain (ensemble→fanout→supervisor→pipeline→single)
+```
+
+### 9.6 What This Means for Production
+
+- **Cost transparency**: Every LLM call is tracked with delta-only values. No silent inflation.
+- **Race condition safety**: Parallel agents (ensemble) cannot collectively exceed budget.
+- **Zero-waste execution**: Nodes skip LLM calls entirely when budget is exhausted.
+- **Multiple safety nets**: Even if one gate misses, the circuit breaker catches overruns at 110%.
+- **Correct band detection**: `BudgetTracker` stays in sync with live state, so `budget_interrupt.py` fires accurately.
+
+---
+
+## 10. Future Research Directions
+
+### 10.1 Online ILP (Restore Paper Fidelity)
 
 The original AAAI-26 paper uses ILP for model selection. Implement a lightweight online ILP solver using `scipy.optimize.milp` (already in `requirements.txt` as `scipy`) that uses **observed cost-per-token data** from `core/stats.py` as ILP coefficients. This would make BAMAS fully paper-faithful and publishable as an extension.
 
-### 8.2 Cross-Task RL Transfer
+### 10.2 Cross-Task RL Transfer
 
 Current Thompson Sampling resets per deployment. Add **task embedding similarity**: when a new task arrives, find the 3 most similar past tasks (cosine similarity of task embeddings stored in Redis), and initialise the Thompson Sampling priors from their outcomes. This is a direct research contribution.
 
-### 8.3 Topology-Aware Escalation
+### 10.3 Topology-Aware Escalation
 
 `docs/plan.md` notes:
 > *"Current implementation is threshold-based. Not topology-aware."*
 
 For supervisor topology, the escalation check should compare divergence between *worker sub-results*, not just executor vs. validator. This requires routing divergence signals through the supervisor dispatch loop.
 
-### 8.4 Adversarial Budget Injection Resistance
+### 10.4 Adversarial Budget Injection Resistance
 
 As documented in AgentPrune (2024), multi-agent systems are vulnerable to adversarial messages inflating token counts. BAMAS's budget governor could be extended with a **token-budget pre-commitment** step: estimate max tokens per step from the plan, reject execution if a step would exceed its allocation.
 
-### 8.5 Benchmark on SWE-Bench / GAIA
+### 10.5 Benchmark on SWE-Bench / GAIA
 
 The AAAI-26 paper evaluates on 3 internal tasks. A public evaluation on **SWE-Bench** (code), **GAIA** (general), and **HumanEval** (code generation) would make BAMAS's cost savings claims independently verifiable and dramatically increase academic citations and GitHub visibility.
 
 ---
 
-## Summary: Top 5 Actions Right Now
+## Summary: Top 5 Next Priorities
 
 | # | Action | File | Impact | Time |
 |---|---|---|---|---|
-| 1 | Build mid-execution budget checkpoint | `core/budget_interrupt.py` | Closes the biggest technical gap vs. the paper | 3d |
-| 2 | Add `POST /estimate` endpoint | `api/routes/estimate.py` | Enables CLI + developer self-service | 1d |
-| 3 | Scaffold `stats.py` + `learning.py` | `core/` | Completes the architecture promised in file-spec.md | 1d |
-| 4 | Make RL thresholds configurable | `core/config.py`, `core/rl_policy.py` | Fixes plan.md inconsistency, enables tuning | 0.5d |
-| 5 | Wire JWT auth | `api/middleware/auth.py` | Unblocks multi-tenancy, removes dead config | 1d |
+| 1 | PostgreSQL audit persistence | `core/audit.py` | Unlocks production durability, multi-tenant audit | 2d |
+| 2 | Prometheus metrics + Grafana dashboards | `api/main.py`, new `metrics/` | Production monitoring, SLA tracking | 3d |
+| 3 | Rate limiting on API endpoints | `api/middleware/` | Security, fairness, abuse prevention | 1d |
+| 4 | OpenTelemetry distributed tracing | `agent/nodes/`, `core/` | Debugging at scale, cross-service visibility | 2d |
+| 5 | Kubernetes manifests + health probes | `deploy/` | Deployment maturity, horizontal scaling | 2d |
 
 ---
 
-*Generated: 2026-07-01 | Based on AAAI-26 paper + repo analysis + web research*
+*Generated: 2026-07-09 | Based on AAAI-26 paper + repo analysis + web research*
+*Last updated: Budget hardening P1–P7 complete (commit `19f1b6c`)*

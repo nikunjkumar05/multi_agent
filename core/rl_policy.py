@@ -318,6 +318,51 @@ class RLPolicy:
         except Exception:
             return False
 
+    # ── Full reset ─────────────────────────────────────────────────────
+
+    async def reset(self) -> bool:
+        """
+        Full reset: flush Redis, truncate SQLite, reset arms to uniform priors.
+        Saves a fresh snapshot so rollback has a clean starting point.
+        """
+        try:
+            # Flush Redis keys
+            if self.redis is not None:
+                keys = []
+                async for key in self.redis.scan_iter("rl_policy:*"):
+                    keys.append(key)
+                if keys:
+                    await self.redis.delete(*keys)
+
+            # Truncate SQLite tables
+            await self._ensure_db()
+            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
+                await db.execute("DELETE FROM rl_snapshots")
+                await db.execute("DELETE FROM rl_overrides")
+                await db.execute("DELETE FROM rl_rewards")
+                await db.commit()
+
+            # Reset in-memory state
+            self.arms = {topo: {"alpha": 1.0, "beta": 1.0} for topo in TOPOLOGIES}
+            self.total_tasks = 0
+
+            # Sync fresh state to Redis
+            if self.redis is not None:
+                pipe = await self.redis.pipeline()
+                for topo in TOPOLOGIES:
+                    pipe.hset(f"rl_policy:arm:{topo}", mapping={
+                        "alpha": "1.0", "beta": "1.0",
+                    })
+                pipe.set("rl_policy:total_tasks", 0)
+                await pipe.execute()
+
+            # Save fresh snapshot and file
+            self._save_to_file()
+            await self.save_snapshot()
+            return True
+        except Exception:
+            return False
+
     # ── Audit trail ────────────────────────────────────────────────────
 
     async def log_override(

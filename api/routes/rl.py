@@ -37,3 +37,17 @@ async def get_rl_rewards(topology: str | None = None, limit: int = 100) -> list[
         return []
     rl = RLPolicy(redis)
     return await rl.get_reward_history(topology=topology, limit=limit)
+
+
+@router.post("/reset")
+async def reset_rl_policy() -> dict:
+    """Full reset: flush Redis, truncate SQLite, reset arms to uniform priors."""
+    redis = await get_redis()
+    if not redis:
+        return {"error": "Redis not available"}
+    rl = RLPolicy(redis)
+    success = await rl.reset()
+    if success:
+        stats = await rl.get_stats()
+        return {"status": "reset", "arms": stats}
+    return {"error": "Reset failed"}

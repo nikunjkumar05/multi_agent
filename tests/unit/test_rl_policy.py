@@ -282,3 +282,151 @@ class TestFilePersistence:
             data = json.load(f)
         assert data["arms"]["pipeline"]["alpha"] == 2.0
         assert data["total_tasks"] == 1
+
+
+class TestReset:
+    @pytest.mark.asyncio
+    async def test_reset_clears_redis_keys(self, tmp_path):
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        async def mock_scan_iter(match):
+            for key in ["rl_policy:arm:single", "rl_policy:arm:pipeline",
+                        "rl_policy:arm:supervisor", "rl_policy:arm:fanout",
+                        "rl_policy:arm:ensemble", "rl_policy:total_tasks"]:
+                yield key
+
+        mock_redis.scan_iter = mock_scan_iter
+        pipe = MagicMock()
+        pipe.hset = MagicMock()
+        pipe.set = MagicMock()
+        pipe.execute = AsyncMock()
+        mock_redis.pipeline = AsyncMock(return_value=pipe)
+
+        policy = RLPolicy(mock_redis, persist_path=str(tmp_path / "rl.json"))
+        policy.arms = {t: {"alpha": 10.0, "beta": 2.0} for t in TOPOLOGIES}
+        policy.total_tasks = 50
+
+        result = await policy.reset()
+
+        assert result is True
+        assert policy.total_tasks == 0
+        for topo in TOPOLOGIES:
+            assert policy.arms[topo] == {"alpha": 1.0, "beta": 1.0}
+        mock_redis.delete.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reset_truncates_sqlite(self, tmp_path):
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        async def mock_scan_iter(match):
+            return
+            yield  # make it an async generator
+
+        mock_redis.scan_iter = mock_scan_iter
+        pipe = MagicMock()
+        pipe.hset = MagicMock()
+        pipe.set = MagicMock()
+        pipe.execute = AsyncMock()
+        mock_redis.pipeline = AsyncMock(return_value=pipe)
+
+        policy = RLPolicy(mock_redis, persist_path=str(tmp_path / "rl.json"))
+        policy._sqlite_path = str(tmp_path / "test_rl.db")
+
+        # Seed some data
+        await policy._ensure_db()
+        import aiosqlite
+        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
+            await db.execute("INSERT INTO rl_rewards (timestamp, topology, reward) VALUES (?, ?, ?)",
+                             ("2026-01-01", "pipeline", 0.8))
+            await db.execute("INSERT INTO rl_overrides (timestamp, task_id, task, llm_topology, rl_topology, confidence, task_type) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                             ("2026-01-01", "t1", "test", "single", "pipeline", 0.9, "code"))
+            await db.commit()
+
+        # Verify data exists
+        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
+            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_rewards")
+            assert rows[0][0] == 1
+            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_overrides")
+            assert rows[0][0] == 1
+
+        await policy.reset()
+
+        # Verify data is gone
+        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
+            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_rewards")
+            assert rows[0][0] == 0
+            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_overrides")
+            assert rows[0][0] == 0
+            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_snapshots")
+            # Only the fresh snapshot from reset
+            assert rows[0][0] == 1
+
+    @pytest.mark.asyncio
+    async def test_reset_saves_fresh_snapshot(self, tmp_path):
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        async def mock_scan_iter(match):
+            return
+            yield
+
+        mock_redis.scan_iter = mock_scan_iter
+        pipe = MagicMock()
+        pipe.hset = MagicMock()
+        pipe.set = MagicMock()
+        pipe.execute = AsyncMock()
+        mock_redis.pipeline = AsyncMock(return_value=pipe)
+
+        policy = RLPolicy(mock_redis, persist_path=str(tmp_path / "rl.json"))
+        policy._sqlite_path = str(tmp_path / "test_rl.db")
+
+        await policy.reset()
+
+        # Should have exactly 1 snapshot with fresh arms
+        import aiosqlite, json
+        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
+            rows = await db.execute_fetchall(
+                "SELECT arms_json, total_tasks FROM rl_snapshots ORDER BY id DESC LIMIT 1"
+            )
+            assert len(rows) == 1
+            arms = json.loads(rows[0][0])
+            assert rows[0][1] == 0
+            for topo in TOPOLOGIES:
+                assert arms[topo] == {"alpha": 1.0, "beta": 1.0}
+
+    @pytest.mark.asyncio
+    async def test_reset_writes_fresh_file(self, tmp_path):
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        async def mock_scan_iter(match):
+            return
+            yield
+
+        mock_redis.scan_iter = mock_scan_iter
+        pipe = MagicMock()
+        pipe.hset = MagicMock()
+        pipe.set = MagicMock()
+        pipe.execute = AsyncMock()
+        mock_redis.pipeline = AsyncMock(return_value=pipe)
+
+        persist = str(tmp_path / "rl.json")
+        policy = RLPolicy(mock_redis, persist_path=persist)
+        policy._sqlite_path = str(tmp_path / "test_rl.db")
+
+        # Write stale data first
+        policy.arms = {t: {"alpha": 99.0, "beta": 99.0} for t in TOPOLOGIES}
+        policy.total_tasks = 999
+        policy._save_to_file()
+
+        await policy.reset()
+
+        import json
+        with open(persist, "r") as f:
+            data = json.load(f)
+        assert data["total_tasks"] == 0
+        for topo in TOPOLOGIES:
+            assert data["arms"][topo] == {"alpha": 1.0, "beta": 1.0}

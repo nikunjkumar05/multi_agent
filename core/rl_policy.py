@@ -324,29 +324,12 @@ class RLPolicy:
         """
         Full reset: flush Redis, truncate SQLite, reset arms to uniform priors.
         Saves a fresh snapshot so rollback has a clean starting point.
+
+        Writes fresh state BEFORE deleting old state. If anything fails
+        mid-way, old state is still recoverable via load().
         """
         try:
-            # Flush Redis keys
-            if self.redis is not None:
-                keys = []
-                async for key in self.redis.scan_iter("rl_policy:*"):
-                    keys.append(key)
-                if keys:
-                    await self.redis.delete(*keys)
-
-            # Truncate SQLite tables
-            await self._ensure_db()
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                await db.execute("DELETE FROM rl_snapshots")
-                await db.execute("DELETE FROM rl_overrides")
-                await db.execute("DELETE FROM rl_rewards")
-                await db.commit()
-
-            # Reset in-memory state
-            self.arms = {topo: {"alpha": 1.0, "beta": 1.0} for topo in TOPOLOGIES}
-            self.total_tasks = 0
-
-            # Sync fresh state to Redis
+            # Phase 1: Write fresh state to Redis first
             if self.redis is not None:
                 pipe = await self.redis.pipeline()
                 for topo in TOPOLOGIES:
@@ -356,7 +339,27 @@ class RLPolicy:
                 pipe.set("rl_policy:total_tasks", 0)
                 await pipe.execute()
 
-            # Save fresh snapshot and file
+            # Phase 2: Truncate SQLite and write fresh snapshot
+            await self._ensure_db()
+            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
+                await db.execute("DELETE FROM rl_snapshots")
+                await db.execute("DELETE FROM rl_overrides")
+                await db.execute("DELETE FROM rl_rewards")
+                await db.commit()
+
+            # Phase 3: Now safe to flush old Redis keys (fresh keys already written)
+            if self.redis is not None:
+                keys = []
+                async for key in self.redis.scan_iter("rl_policy:*"):
+                    keys.append(key)
+                fresh_keys = {f"rl_policy:arm:{t}" for t in TOPOLOGIES} | {"rl_policy:total_tasks"}
+                old_keys = [k for k in keys if k not in fresh_keys]
+                if old_keys:
+                    await self.redis.delete(*old_keys)
+
+            # Phase 4: Reset in-memory, save file and snapshot
+            self.arms = {topo: {"alpha": 1.0, "beta": 1.0} for topo in TOPOLOGIES}
+            self.total_tasks = 0
             self._save_to_file()
             await self.save_snapshot()
             return True

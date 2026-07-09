@@ -40,8 +40,13 @@ async def get_rl_rewards(topology: str | None = None, limit: int = 100) -> list[
 
 
 @router.post("/reset")
-async def reset_rl_policy() -> dict:
-    """Full reset: flush Redis, truncate SQLite, reset arms to uniform priors."""
+async def reset_rl_policy(confirm: str = "") -> dict:
+    """Full reset: flush Redis, truncate SQLite, reset arms to uniform priors.
+
+    Requires confirm=yes to prevent accidental wipes.
+    """
+    if confirm != "yes":
+        return {"error": "Pass confirm=yes to reset RL state"}
     redis = await get_redis()
     if not redis:
         return {"error": "Redis not available"}

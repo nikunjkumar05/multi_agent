@@ -79,7 +79,13 @@ async def test_rl_reset_endpoint():
     with patch("api.routes.rl.get_redis", new_callable=lambda: AsyncMock(return_value=mock_redis)):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # Without confirm — should reject
             r = await client.post("/rl/reset")
+            assert r.status_code == 200
+            assert r.json()["error"] == "Pass confirm=yes to reset RL state"
+
+            # With confirm=yes — should succeed
+            r = await client.post("/rl/reset?confirm=yes")
             assert r.status_code == 200
             data = r.json()
             assert data["status"] == "reset"

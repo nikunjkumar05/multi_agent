@@ -48,7 +48,7 @@ class _MockPubSub:
     async def unsubscribe(self, channel: str) -> None:
         self._channels = [c for c in self._channels if c != channel]
 
-    async def listen(self) -> list[dict]:  # type: ignore[override]
+    async def listen(self):  # type: ignore[override]
         for msg in self._messages:
             yield msg
         # After yielding all messages, block until cancelled

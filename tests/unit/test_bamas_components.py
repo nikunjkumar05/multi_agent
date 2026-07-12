@@ -92,11 +92,11 @@ class TestProjections:
         result = project_pipeline_to_single(state)
         assert result["topology"] == "single"
 
-    def test_project_state_adds_history(self):
+    def test_project_state_excludes_topology_history(self):
+        """topology_history is annotated with operator.add — preserved by checkpointer, not projection."""
         state = {"topology": "ensemble", "candidate_outputs": {}}
         result = project_state(state, "ensemble", "single")
-        assert "topology_history" in result
-        assert result["topology_history"] == [{"from": "ensemble", "to": "single"}]
+        assert "topology_history" not in result
 
     def test_project_state_raises_on_invalid_edge(self):
         state = {"topology": "single"}

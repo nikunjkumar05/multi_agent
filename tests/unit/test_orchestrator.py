@@ -9,7 +9,7 @@ from langgraph.constants import START
 from langgraph.graph import StateGraph
 from langgraph.types import interrupt
 
-from agent.orchestrator import _next_topology
+from core.budget import next_topology as _next_topology
 
 
 # ── Shared test state ──
@@ -245,3 +245,44 @@ class TestNextTopology:
 
     def test_unknown_defaults_to_single(self):
         assert _next_topology("nonexistent") == "single"
+
+
+# ── Quality degradation (Gap 6) ──
+
+class TestQualityDegradation:
+    def test_no_degradation_returns_none(self):
+        from agent.orchestrator import _estimate_quality_degradation
+        result = _estimate_quality_degradation({"topology": "single"}, 0)
+        assert result is None
+
+    def test_single_degradation(self):
+        from agent.orchestrator import _estimate_quality_degradation
+        result = _estimate_quality_degradation({"topology": "single"}, 1)
+        assert result is not None
+        assert result["degradation_count"] == 1
+        assert result["estimated_quality"] < 1.0
+
+    def test_multiple_degradations(self):
+        from agent.orchestrator import _estimate_quality_degradation
+        result1 = _estimate_quality_degradation({"topology": "single"}, 1)
+        result2 = _estimate_quality_degradation({"topology": "single"}, 2)
+        assert result2["estimated_quality"] < result1["estimated_quality"]
+
+    def test_topology_quality_factors(self):
+        from agent.orchestrator import _estimate_quality_degradation
+        for topo, factor in [("ensemble", 1.0), ("fanout", 0.8), ("single", 0.5)]:
+            result = _estimate_quality_degradation({"topology": topo}, 0)
+            assert result is None  # No degradation
+            result = _estimate_quality_degradation({"topology": topo}, 1)
+            assert result["topology_quality_factor"] == factor
+
+    def test_quality_in_build_result(self):
+        from agent.orchestrator import _build_result
+        result = _build_result(
+            {"status": "completed", "final_output": "test"},
+            "single",
+            degradation_count=1,
+        )
+        assert "quality_degradation" in result
+        assert result["quality_degradation"] is not None
+        assert "estimated_quality" in result["quality_degradation"]

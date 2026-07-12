@@ -16,11 +16,10 @@ from __future__ import annotations
 from enum import Enum
 
 from core.audit import get_audit_trail
-from core.budget import BudgetBand, BudgetTracker
+from core.budget import BudgetBand, BudgetTracker, TOPOLOGY_DEGRADATION_CHAIN, next_topology
 from core.node_events import emit_event
 
-TOPOLOGY_DEGRADATION_CHAIN = ["ensemble", "fanout", "supervisor", "pipeline", "single"]
-HARD_CAP_MULTIPLIER = 1.1  # Circuit breaker triggers at 110% of budget
+HARD_CAP_MULTIPLIER = 1.05  # Circuit breaker triggers at 105% of budget
 
 
 class BudgetGateAction(str, Enum):
@@ -28,15 +27,6 @@ class BudgetGateAction(str, Enum):
     PAUSE = "pause"
     SKIP_JUDGE = "skip_judge"
     EMERGENCY_SINGLE = "emergency_single"
-
-
-def _next_topology(current: str) -> str:
-    """Get the next topology in the degradation chain."""
-    try:
-        idx = TOPOLOGY_DEGRADATION_CHAIN.index(current)
-        return TOPOLOGY_DEGRADATION_CHAIN[min(idx + 1, len(TOPOLOGY_DEGRADATION_CHAIN) - 1)]
-    except ValueError:
-        return "single"
 
 
 def _spent_band(spent_pct: float) -> str:
@@ -135,7 +125,7 @@ async def budget_gate_node(state: dict) -> dict:
     band = _spent_band(spent_pct)
 
     if action == BudgetGateAction.PAUSE:
-        to_topology = _next_topology(topology)
+        to_topology = next_topology(topology)
         await emit_event(
             task_id,
             "budget_gate_pause",

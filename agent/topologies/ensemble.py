@@ -64,8 +64,11 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
         if decision and hasattr(decision, "model_tiers"):
             tier = decision.model_tiers.get("executor", "standard")
 
+        # Domain expert uses frontier tier only if budget allows (HEALTHY band)
         if role == "domain_expert":
-            tier = "frontier"
+            budget = state.get("budget")
+            if budget and budget.get_band().value == "healthy":
+                tier = "frontier"
 
         budget = state.get("budget")
         acc_cost = state.get("consumed_cost", 0.0)
@@ -74,25 +77,12 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
         agent_caps = state.get("_agent_budget_caps", {})
         agent_cap = agent_caps.get(agent_key)
 
-        if budget and budget.max_cost_usd > 0:
-            spent_pct = (acc_cost / budget.max_cost_usd) * 100
-
-            # Global threshold: skip if >=80% spent (prevents 3x race overrun)
-            if spent_pct >= 80:
-                await emit_event(task_id, "agent_skipped", {
-                    "agent_key": agent_key,
-                    "role": role,
-                    "reason": "budget_critical",
-                    "spent_pct": round(spent_pct, 1),
-                })
-                return {
-                    "consumed_tokens": 0,
-                    "consumed_cost": 0,
-                    "logs": [f"Agent {role} skipped - budget critical ({spent_pct:.0f}% spent)"],
-                }
-
-            # Per-agent cap: skip if this agent's share is exhausted
-            if agent_cap is not None and acc_cost >= agent_cap:
+        if budget and budget.max_cost_usd > 0 and agent_cap is not None:
+            # Per-agent cap: skip if this agent's pre-allocated share is exhausted
+            # Note: acc_cost is stale in parallel execution, but the cap is pre-computed
+            # by ensemble_dispatcher as acc_cost + per_agent, so this check is reliable.
+            if acc_cost >= agent_cap:
+                spent_pct = (acc_cost / budget.max_cost_usd) * 100
                 await emit_event(task_id, "agent_skipped", {
                     "agent_key": agent_key,
                     "role": role,

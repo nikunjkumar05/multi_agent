@@ -98,7 +98,21 @@ async def validate_result(state: AgentState) -> dict:
         )),
     ]
 
-    response = await llm.ainvoke(messages)
+    try:
+        response = await llm.ainvoke(messages)
+    except Exception as e:
+        task_id = state.get("task_id", "")
+        await emit_event(task_id, "validation_skipped", {
+            "reason": f"llm_error: {e}",
+        })
+        return {
+            "validator_confidence": 0.5,
+            "reasoning_diverged": False,
+            "status": "validating",
+            "consumed_tokens": 0,
+            "consumed_cost": 0.0,
+            "logs": [f"Validation skipped - LLM error: {e}"],
+        }
 
     val_tokens = estimate_tokens(response)
     val_cost = estimate_cost(response, tier)

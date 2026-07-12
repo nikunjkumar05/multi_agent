@@ -1,15 +1,21 @@
 import asyncio
+import collections
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
+log = logging.getLogger(__name__)
+
+_MAX_IN_MEMORY_ENTRIES = 10000
+
 
 class AuditTrail:
     def __init__(self) -> None:
-        self._entries: list[dict[str, Any]] = []
+        self._entries: collections.deque[dict[str, Any]] = collections.deque(maxlen=_MAX_IN_MEMORY_ENTRIES)
         from core.config import settings
 
         self._db_path: str = settings.audit_db_path
@@ -50,8 +56,8 @@ class AuditTrail:
                     ),
                 )
                 await db.commit()
-        except Exception:
-            pass  # DB write is best-effort; in-memory list is source of truth
+        except Exception as e:
+            log.warning("Audit SQLite write failed for task %s: %s", entry.get("task_id"), e)
 
     async def load_from_db(self, task_id: str) -> list[dict[str, Any]]:
         """

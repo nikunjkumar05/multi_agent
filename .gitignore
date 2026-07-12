@@ -19,3 +19,4 @@ rl_policy.json
 workspace/*.db
 debug_*.py
 instance/
+workspace/

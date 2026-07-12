@@ -5,6 +5,8 @@ from core.config import settings
 
 ModelTier = Literal["cheap", "standard", "frontier"]
 
+TOPOLOGY_DEGRADATION_CHAIN = ["ensemble", "fanout", "supervisor", "pipeline", "single"]
+
 
 class BudgetBand(str, Enum):
     HEALTHY = "healthy"
@@ -66,14 +68,16 @@ class BudgetTracker:
         return self.get_band() in (BudgetBand.STRUCTURAL_DEGRADE, BudgetBand.CRITICAL)
     
     def get_degraded_topology(self, current_topology: str) -> str:
-        degradation_map = {
-            "ensemble": "fanout",
-            "fanout": "supervisor",
-            "supervisor": "pipeline",
-            "pipeline": "single",
-            "single": "single",
-        }
-        return degradation_map.get(current_topology, "single")
+        return next_topology(current_topology)
+
+
+def next_topology(current: str) -> str:
+    """Get the next topology in the degradation chain."""
+    try:
+        idx = TOPOLOGY_DEGRADATION_CHAIN.index(current)
+        return TOPOLOGY_DEGRADATION_CHAIN[min(idx + 1, len(TOPOLOGY_DEGRADATION_CHAIN) - 1)]
+    except ValueError:
+        return "single"
 
 
 def should_skip_llm(state: dict, threshold: float = 0.9) -> bool:

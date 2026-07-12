@@ -132,6 +132,8 @@ async def execute_step(state: AgentState) -> dict:
         }
 
     task_id = state.get("task_id", "")
+    step_results = dict(state.get("step_results", {}))
+
     await emit_event(task_id, "step_started", {
         "step_id": step["step_id"],
         "description": step["description"],
@@ -200,7 +202,6 @@ async def execute_step(state: AgentState) -> dict:
     ]
 
     budget = state.get("budget")
-    step_results = dict(state.get("step_results", {}))
 
     try:
         langchain_tools = registry.get_langchain_tools()
@@ -301,13 +302,22 @@ async def execute_step(state: AgentState) -> dict:
 
 
 async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) -> tuple[str, int, float]:
+    import asyncio
+
     tool_messages: list = []
     executed_code_hashes: set[int] = set()
     loop_tokens = 0
     loop_cost = 0.0
+    _LLM_TIMEOUT = 100  # per-call timeout (seconds)
 
     for _iteration in range(MAX_TOOL_ITERATIONS):
-        response = await llm.ainvoke(messages + tool_messages)
+        try:
+            response = await asyncio.wait_for(
+                llm.ainvoke(messages + tool_messages),
+                timeout=_LLM_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            return f"[LLM call timed out after {_LLM_TIMEOUT}s]", loop_tokens, loop_cost
 
         loop_tokens += estimate_tokens(response)
         loop_cost += estimate_cost(response, tier)

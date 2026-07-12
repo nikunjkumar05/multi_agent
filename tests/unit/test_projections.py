@@ -15,6 +15,7 @@ from core.projections import (
     project_state,
     project_supervisor_to_pipeline,
     project_supervisor_to_single,
+    validate_projected_state,
 )
 
 
@@ -202,13 +203,55 @@ class TestDispatchTable:
 # ── topology_history accumulation ──────────────────────────────────────
 
 class TestHistoryAccumulation:
-    def test_preserves_existing_history(self):
+    def test_excludes_topology_history_from_projection(self):
+        """topology_history is annotated with operator.add — preserved by checkpointer, not projection."""
         state = _base_state(
             topology_history=[{"from": "ensemble", "to": "fanout"}]
         )
         result = project_state(state, "fanout", "supervisor")
-        history = result["topology_history"]
-        assert len(history) == 2
-        assert history[0]["from"] == "ensemble"
-        assert history[1]["from"] == "fanout"
-        assert history[1]["to"] == "supervisor"
+        assert "topology_history" not in result
+
+
+# ── State validation (Gap 2) ──────────────────────────────────────────
+
+class TestValidateProjectedState:
+    def test_valid_single_topology(self):
+        projected = {"topology": "single"}
+        is_valid, err = validate_projected_state(projected, "single")
+        assert is_valid is True
+        assert err == ""
+
+    def test_valid_supervisor_topology(self):
+        projected = {"topology": "supervisor", "supervisor_remaining_tasks": None}
+        is_valid, err = validate_projected_state(projected, "supervisor")
+        assert is_valid is True
+
+    def test_valid_fanout_topology(self):
+        projected = {"topology": "fanout", "_worker_assignments": None}
+        is_valid, err = validate_projected_state(projected, "fanout")
+        assert is_valid is True
+
+    def test_missing_topology_field(self):
+        projected = {}
+        is_valid, err = validate_projected_state(projected, "single")
+        assert is_valid is False
+        assert "missing" in err.lower()
+
+    def test_topology_mismatch(self):
+        projected = {"topology": "fanout"}
+        is_valid, err = validate_projected_state(projected, "single")
+        assert is_valid is False
+        assert "mismatch" in err.lower()
+
+    def test_not_dict(self):
+        is_valid, err = validate_projected_state("not a dict", "single")
+        assert is_valid is False
+        assert "not a dict" in err
+
+    def test_projected_state_validated_in_safe_project(self):
+        """validate_projected_state is called in _safe_project."""
+        from agent.orchestrator import _safe_project
+        state = _base_state()
+        projected, topo = _safe_project(state, "pipeline", "single", "pipeline")
+        assert projected is not None
+        assert topo == "single"

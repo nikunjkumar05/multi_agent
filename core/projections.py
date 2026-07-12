@@ -178,6 +178,8 @@ def project_state(state: dict[str, Any], from_topology: str, to_topology: str) -
     """
     Project state from one topology to another.
     Returns a partial state update (no annotated fields).
+    topology_history is annotated with operator.add and preserved automatically
+    by the checkpointer — do NOT include it in projection output.
     """
     key = (from_topology, to_topology)
     proj_fn = _PROJECTIONS.get(key)
@@ -186,11 +188,7 @@ def project_state(state: dict[str, Any], from_topology: str, to_topology: str) -
 
     projected = proj_fn(state)
 
-    # Append to topology_history (preserve existing history from prior degradations)
-    existing_history = state.get("topology_history", [])
-    projected["topology_history"] = existing_history + [
-        {"from": from_topology, "to": to_topology}
-    ]
+    # topology_history is annotated — preserved by checkpointer, do NOT set it here
 
     return projected
 
@@ -252,3 +250,44 @@ def _check_structure(text: str) -> float:
         score += 0.2
 
     return min(score, 1.0)
+
+
+# ── State Validation ─────────────────────────────────────────────────
+
+_TOPOLOGY_REQUIRED_FIELDS: dict[str, list[str]] = {
+    "single": ["topology"],
+    "pipeline": ["topology"],
+    "supervisor": ["topology"],
+    "fanout": ["topology"],
+    "ensemble": ["topology"],
+}
+
+_TOPOLOGY_OPTIONAL_FIELDS: dict[str, list[str]] = {
+    "supervisor": ["supervisor_remaining_tasks", "supervisor_completed_tasks"],
+    "fanout": ["_worker_assignments", "fanout_worker_results"],
+    "ensemble": ["agent_a_result", "agent_b_result", "agent_c_result"],
+}
+
+
+def validate_projected_state(projected: dict[str, Any], to_topology: str) -> tuple[bool, str]:
+    """
+    Validate that a projected state is valid for the target topology.
+    Returns (is_valid, error_message).
+    Catches incomplete projections that would crash the new graph.
+    """
+    if not isinstance(projected, dict):
+        return False, "Projected state is not a dict"
+
+    topology = projected.get("topology")
+    if topology is None:
+        return False, "Projected state missing 'topology' field"
+
+    if topology != to_topology:
+        return False, f"Projected topology mismatch: expected {to_topology}, got {topology}"
+
+    required = _TOPOLOGY_REQUIRED_FIELDS.get(to_topology, ["topology"])
+    for field in required:
+        if field not in projected:
+            return False, f"Projected state missing required field '{field}' for {to_topology}"
+
+    return True, ""

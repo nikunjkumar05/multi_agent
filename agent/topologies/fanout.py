@@ -126,6 +126,7 @@ async def parallel_workers_node(state: AgentState) -> dict:
     for i, r in enumerate(results):
         worker_name = list(assignments.keys())[i] if i < len(assignments) else f"worker_{i}"
         if isinstance(r, Exception):
+            log.warning("Worker %s raised: %s", worker_name, r)
             merged_logs.append(f"Worker error: {r}")
             fanout_worker_results.append({"worker": worker_name, "steps": [], "status": "error"})
             continue

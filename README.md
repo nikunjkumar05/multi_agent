@@ -1,4 +1,4 @@
-# BAMAS — Budget-Aware Multi-Agent System
+# BAMASE — Budget-Aware Multi-Agent System Executor
 
 A budget-aware multi-agent system that accepts plain-English tasks via API, uses a cost-tier optimizer (adapted from [BAMAS](https://arxiv.org/abs/2504.11428)) to select topology and model tiers, then orchestrates specialized agents with reasoning-divergence escalation and **mid-execution topology degradation** under budget pressure.
 

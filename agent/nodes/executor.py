@@ -128,6 +128,7 @@ async def execute_step(state: AgentState) -> dict:
             "current_step_index": idx + 1,
             "status": "executing",
             "retry_count": 0,
+            "completed_step_ids": [step["step_id"]],
             "logs": [f"Step {step['step_id']} skipped - budget cap exceeded"],
         }
 
@@ -160,6 +161,7 @@ async def execute_step(state: AgentState) -> dict:
             "current_step_index": idx + 1,
             "status": "executing",
             "retry_count": 0,
+            "completed_step_ids": [step["step_id"]],
             "errors": [],
             "logs": [f"Step {step['step_id']} skipped - budget exhausted"],
         }
@@ -239,6 +241,7 @@ async def execute_step(state: AgentState) -> dict:
                 "current_step_index": idx + 1,
                 "status": "executing",
                 "retry_count": 0,
+                "completed_step_ids": [step["step_id"]],
                 "errors": [],
                 "consumed_tokens": exec_tokens,
                 "consumed_cost": exec_cost,
@@ -267,6 +270,7 @@ async def execute_step(state: AgentState) -> dict:
             "current_step_index": idx + 1,
             "status": "executing",
             "retry_count": 0,
+            "completed_step_ids": [step["step_id"]],
             "errors": [],
             "consumed_tokens": exec_tokens,
             "consumed_cost": exec_cost,
@@ -288,6 +292,7 @@ async def execute_step(state: AgentState) -> dict:
                 "current_step_index": idx + 1,
                 "status": "executing",
                 "retry_count": 0,
+                "completed_step_ids": [step["step_id"]],
                 "errors": state.get("errors", []) + [f"Step {step['step_id']} failed after {MAX_RETRIES} retries: {e}"],
                 "logs": [f"Step {step['step_id']} failed after {MAX_RETRIES} retries — skipping"],
             }

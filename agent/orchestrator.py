@@ -26,6 +26,7 @@ import logging
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START
 
 from core.audit import get_audit_trail
 from core.budget import BudgetBand, BudgetTracker, next_topology
@@ -62,8 +63,8 @@ async def run_task_with_degradation(
     current_topology = topology
     current_graph = graph
 
-    # Set initial state
-    current_graph.update_state(config, initial_state)
+    # Set initial state — as_node=START ensures execution begins from entry_router
+    current_graph.update_state(config, initial_state, as_node=START)
 
     max_degradations = 5  # Safety limit to prevent infinite loops
     degradation_count = 0
@@ -92,8 +93,9 @@ async def run_task_with_degradation(
 
         # Check for interrupt
         if "__interrupt__" not in result:
-            # Normal completion
-            return _build_result(result, current_topology, degradation_count)
+            # Normal completion — read accumulated cost from checkpoint
+            final_state = current_graph.get_state(config).values
+            return _build_result(result, current_topology, degradation_count, final_state)
 
         # Interrupt detected — extract payload
         interrupts = result["__interrupt__"]
@@ -173,6 +175,10 @@ async def run_task_with_degradation(
         # Sync BudgetTracker with projected state
         _sync_budget_tracker(projected)
 
+        # Record topology history for this degradation
+        # topology_history is annotated with operator.add — append a record
+        projected["topology_history"] = [{"from": from_topology, "to": to_topology, "reason": reason}]
+
         # Emit degradation event
         await emit_event(
             task_id,
@@ -202,7 +208,7 @@ async def run_task_with_degradation(
 
         current_topology = to_topology
         current_graph = compile_graph(current_topology)
-        current_graph.update_state(config, projected)
+        current_graph.update_state(config, projected, as_node=START)
 
         degradation_count += 1
 
@@ -249,9 +255,15 @@ def _safe_project(
                 from_topology, to_topology, from_topology, fallback_topology,
             )
             # Return minimal projection that keeps current topology
+            # Include all fields required by nodes to avoid KeyError crashes
             return {
                 "topology": fallback_topology,
+                "task": state.get("task"),
+                "task_id": state.get("task_id"),
+                "decision": state.get("decision"),
                 "prior_context": state.get("prior_context"),
+                "consumed_cost": state.get("consumed_cost", 0.0),
+                "consumed_tokens": state.get("consumed_tokens", 0),
             }, fallback_topology
 
 
@@ -309,15 +321,31 @@ def _get_budget_remaining(projected: dict[str, Any]) -> float:
 
 
 def _build_result(
-    result: dict[str, Any], topology: str, degradation_count: int
+    result: dict[str, Any], topology: str, degradation_count: int,
+    checkpoint_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the final result dict from graph output."""
+    """Build the final result dict from graph output.
+
+    Args:
+        result: The graph output dict.
+        topology: The final topology name.
+        degradation_count: Number of degradation steps that occurred.
+        checkpoint_state: The latest checkpoint state (for accurate cost).
+    """
     final_output = result.get("final_output") or result.get("final_result")
     status = result.get("status", "completed")
 
     # If we degraded and status is still running, mark as degraded completion
     if degradation_count > 0 and status not in ("completed", "failed"):
         status = "degraded_completion"
+
+    # Use checkpoint state for cumulative cost if available
+    if checkpoint_state is not None:
+        consumed_tokens = checkpoint_state.get("consumed_tokens", result.get("consumed_tokens", 0))
+        consumed_cost = checkpoint_state.get("consumed_cost", result.get("consumed_cost", 0.0))
+    else:
+        consumed_tokens = result.get("consumed_tokens", 0)
+        consumed_cost = result.get("consumed_cost", 0.0)
 
     return {
         "status": status,
@@ -326,8 +354,8 @@ def _build_result(
         "judge_output": result.get("judge_output"),
         "topology": topology,
         "degradation_count": degradation_count,
-        "consumed_tokens": result.get("consumed_tokens", 0),
-        "consumed_cost": result.get("consumed_cost", 0.0),
+        "consumed_tokens": consumed_tokens,
+        "consumed_cost": consumed_cost,
         "quality_degradation": _estimate_quality_degradation(result, degradation_count),
         "logs": result.get("logs", []),
     }

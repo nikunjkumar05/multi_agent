@@ -212,6 +212,36 @@ class TestHistoryAccumulation:
         assert "topology_history" not in result
 
 
+class TestAnnotatedFieldGuard:
+    """Verify that projections raise on any annotated field leak."""
+
+    @pytest.mark.parametrize("from_t,to_t", [
+        ("ensemble", "fanout"),
+        ("ensemble", "supervisor"),
+        ("ensemble", "pipeline"),
+        ("ensemble", "single"),
+        ("fanout", "supervisor"),
+        ("fanout", "pipeline"),
+        ("fanout", "single"),
+        ("supervisor", "pipeline"),
+        ("supervisor", "single"),
+        ("pipeline", "single"),
+    ])
+    def test_projection_rejects_annotated_fields(self, from_t, to_t):
+        from core.projections import _ANNOTATED_FIELDS, _assert_no_annotated_fields
+        # Pick any annotated field and inject it into a valid projection result
+        fake_result = {"topology": to_t, "completed_step_ids": [1, 2]}
+        with pytest.raises(ValueError, match="leaked annotated fields"):
+            _assert_no_annotated_fields(fake_result, f"{from_t}→{to_t}")
+
+    def test_all_annotated_fields_covered(self):
+        from core.projections import _ANNOTATED_FIELDS
+        expected = {"completed_step_ids", "step_results", "candidate_outputs",
+                     "consumed_tokens", "consumed_cost", "topology_history",
+                     "errors", "logs"}
+        assert _ANNOTATED_FIELDS == expected
+
+
 # ── State validation (Gap 2) ──────────────────────────────────────────
 
 class TestValidateProjectedState:

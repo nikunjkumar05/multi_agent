@@ -20,6 +20,7 @@ dependencies = [
     "langgraph>=0.2.0",
     "redis>=5.0.0",
     "aiosqlite>=0.19.0",
+    "asyncpg>=0.29.0",
     "orjson>=3.9.0",
     "pyjwt>=2.7.0",
     "pydantic-settings>=2.0.0",
@@ -51,7 +52,7 @@ python_version = "3.12"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["langchain_*", "langgraph.*", "langsmith.*", "redis.*", "aiosqlite.*", "orjson.*", "scipy.*"]
+module = ["langchain_*", "langgraph.*", "langsmith.*", "redis.*", "aiosqlite.*", "asyncpg.*", "orjson.*", "scipy.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

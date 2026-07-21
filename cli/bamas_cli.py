@@ -52,8 +52,13 @@ def _colorise(text: str, color: str) -> str:
     return text
 
 
-async def _call_estimate(task: str, budget: float, server: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=30.0) as client:
+async def _call_estimate(
+    task: str, budget: float, server: str, token: str | None = None, timeout: float = 30.0,
+) -> dict[str, Any]:
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    async with httpx.AsyncClient(timeout=timeout, headers=headers or None) as client:
         resp = await client.post(
             f"{server.rstrip('/')}/estimate",
             json={"task": task, "budget_usd": budget},
@@ -96,9 +101,9 @@ def _print_report(data: dict[str, Any], task: str, as_json: bool) -> int:
     return {"LOW": 0, "MEDIUM": 1, "HIGH": 2}.get(data.get("risk_level", "HIGH"), 2)
 
 
-async def _run(task: str, budget: float, server: str, as_json: bool) -> int:
+async def _run(task: str, budget: float, server: str, as_json: bool, token: str | None = None, timeout: float = 30.0) -> int:
     try:
-        data = await _call_estimate(task, budget, server)
+        data = await _call_estimate(task, budget, server, token=token, timeout=timeout)
     except httpx.ConnectError:
         print(f"ERROR: Cannot connect to BAMAS server at {server}", file=sys.stderr)
         print("       Is the server running?  Try: uvicorn api.main:app --reload", file=sys.stderr)
@@ -135,9 +140,20 @@ def main() -> None:
         dest="as_json",
         help="Output raw JSON instead of the formatted report",
     )
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="Bearer token for authenticated BAMAS servers",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=30.0,
+        help="HTTP request timeout in seconds (default: 30)",
+    )
     args = parser.parse_args()
 
-    exit_code = asyncio.run(_run(args.task, args.budget, args.server, args.as_json))
+    exit_code = asyncio.run(_run(args.task, args.budget, args.server, args.as_json, token=args.token, timeout=args.timeout))
     sys.exit(exit_code)
 
 

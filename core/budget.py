@@ -96,3 +96,25 @@ def should_skip_llm(state: dict, threshold: float = 0.9) -> bool:
     acc_cost = state.get("consumed_cost", 0.0)
     spent_pct = acc_cost / budget.max_cost_usd
     return spent_pct >= threshold
+
+
+def get_band_from_state(state: dict) -> BudgetBand:
+    """Compute the budget band from the state's consumed_cost.
+
+    This is the correct way to get the band during execution, because
+    BudgetTracker.consumed_cost may be stale (never updated mid-execution).
+    The annotated `consumed_cost` field in state tracks the real cost.
+    """
+    budget = state.get("budget")
+    if not budget or budget.max_cost_usd <= 0:
+        return BudgetBand.HEALTHY
+    acc_cost = state.get("consumed_cost", 0.0)
+    spent_pct = acc_cost / budget.max_cost_usd * 100
+    if spent_pct < 70:
+        return BudgetBand.HEALTHY
+    elif spent_pct < 90:
+        return BudgetBand.TIER_DOWNGRADE
+    elif spent_pct < 100:
+        return BudgetBand.STRUCTURAL_DEGRADE
+    else:
+        return BudgetBand.CRITICAL

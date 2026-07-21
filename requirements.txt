@@ -1,7 +1,8 @@
-
-flask==2.3.2
-flask-restful==0.3.10
-flask-sqlalchemy==3.0.3
-pyjwt==2.7.0
-flask-limiter==3.3.0
-werkzeug==2.3.7
+# BAMAS dependencies are managed in pyproject.toml.
+#
+# Install:
+#   pip install -e .          # production deps
+#   pip install -e ".[dev]"   # production + dev deps
+#
+# Or regenerate this file with:
+#   pip install pip-tools && pip-compile pyproject.toml -o requirements.txt

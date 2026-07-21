@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 from agent.nodes.budget_gate import budget_gate_node
+from agent.nodes.entry_router import entry_router_node
 from agent.nodes.finalizer import finalize_result
 from agent.nodes.judge import ensemble_judge
 from agent.nodes.planner import plan_task
@@ -66,8 +67,8 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
 
         # Domain expert uses frontier tier only if budget allows (HEALTHY band)
         if role == "domain_expert":
-            budget = state.get("budget")
-            if budget and budget.get_band().value == "healthy":
+            from core.budget import get_band_from_state
+            if get_band_from_state(state) == "healthy":
                 tier = "frontier"
 
         budget = state.get("budget")
@@ -164,6 +165,7 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
 def build_ensemble_graph() -> StateGraph:
     builder = StateGraph(AgentState)
 
+    builder.add_node("entry_router", entry_router_node)
     builder.add_node("planner", plan_task)
     builder.add_node("ensemble_dispatcher", ensemble_dispatcher)
     for i, (prompt, role) in enumerate(zip(ENSEMBLE_PROMPTS, ENSEMBLE_ROLES)):
@@ -175,7 +177,8 @@ def build_ensemble_graph() -> StateGraph:
     builder.add_node("budget_gate_post_judge", budget_gate_node)
     builder.add_node("finalizer", finalize_result)
 
-    builder.add_edge(START, "planner")
+    builder.add_edge(START, "entry_router")
+    builder.add_edge("entry_router", "planner")
     builder.add_edge("planner", "ensemble_dispatcher")
     builder.add_edge("ensemble_dispatcher", "agent_a")
     builder.add_edge("ensemble_dispatcher", "agent_b")

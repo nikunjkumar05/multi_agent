@@ -3,7 +3,7 @@ from core.budget import BudgetTracker
 ESCALATION_THRESHOLD_CONFIDENCE = 0.85
 
 
-def should_escalate(validator_confidence: float,reasoning_diverged: bool,budget: BudgetTracker) -> bool:
+def should_escalate(validator_confidence: float, reasoning_diverged: bool, budget: BudgetTracker) -> bool:
     if budget.should_skip_judge():
         return False
 

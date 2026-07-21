@@ -1,9 +1,8 @@
-from core.budget import BudgetTracker, BudgetBand
+from core.budget import BudgetTracker, BudgetBand, next_topology
 from core.audit import get_audit_trail
 
-TOPOLOGY_DEGRADATION_CHAIN = ["ensemble", "fanout", "supervisor", "pipeline", "single"]
 
-def degrade_topology(budget: BudgetTracker,current_topology: str,task_id: str,) -> str:
+def degrade_topology(budget: BudgetTracker, current_topology: str, task_id: str) -> str:
     band = budget.get_band()
 
     if band == BudgetBand.HEALTHY:
@@ -20,11 +19,7 @@ def degrade_topology(budget: BudgetTracker,current_topology: str,task_id: str,) 
         return current_topology
 
     if band == BudgetBand.STRUCTURAL_DEGRADE:
-        try:
-            idx = TOPOLOGY_DEGRADATION_CHAIN.index(current_topology)
-            degraded = TOPOLOGY_DEGRADATION_CHAIN[min(idx + 1, len(TOPOLOGY_DEGRADATION_CHAIN) - 1)]
-        except ValueError:
-            degraded = "single"
+        degraded = next_topology(current_topology)
 
         audit = get_audit_trail()
         audit.record_budget_band(

@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from agent.nodes.budget_gate import budget_gate_node
+from agent.nodes.entry_router import entry_router_node
 from agent.nodes.judge import ensemble_judge
 from agent.nodes.planner import plan_task
 from agent.state import AgentState
@@ -164,6 +165,7 @@ def aggregator_node(state: AgentState) -> dict:
 
 def build_fanout_graph() -> StateGraph:
     builder = StateGraph(AgentState)
+    builder.add_node("entry_router", entry_router_node)
     builder.add_node("planner", plan_task)
     builder.add_node("budget_gate_post_planner", budget_gate_node)
     builder.add_node("dispatcher", dispatcher_node)
@@ -173,7 +175,8 @@ def build_fanout_graph() -> StateGraph:
     builder.add_node("judge", ensemble_judge)
     builder.add_node("budget_gate_post_judge", budget_gate_node)
 
-    builder.add_edge(START, "planner")
+    builder.add_edge(START, "entry_router")
+    builder.add_edge("entry_router", "planner")
     builder.add_edge("planner", "budget_gate_post_planner")
     builder.add_edge("budget_gate_post_planner", "dispatcher")
     builder.add_edge("dispatcher", "parallel_workers")

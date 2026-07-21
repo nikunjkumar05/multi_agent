@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import websocket
-from api.routes import audit, estimate, execute, rl, tasks
+from api.routes import audit, estimate, execute, proxy, rl, tasks
 
 
 @asynccontextmanager
@@ -59,6 +59,7 @@ app.add_middleware(
 )
 
 app.include_router(execute.router)
+app.include_router(proxy.router)
 app.include_router(tasks.router)
 app.include_router(audit.router)
 app.include_router(estimate.router)

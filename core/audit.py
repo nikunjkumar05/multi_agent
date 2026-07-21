@@ -1,87 +1,131 @@
+"""
+Audit trail — records every significant event during task execution.
+
+Dual-layer architecture:
+  - In-memory deque for fast reads (last 10,000 events)
+  - Database persistence via core/db.py (PostgreSQL or SQLite)
+
+Public API unchanged: record(), record_topology_decision(),
+record_budget_band(), record_degradation(), get_task_audit().
+"""
+
 import asyncio
 import collections
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
-
-import aiosqlite
 
 log = logging.getLogger(__name__)
 
 _MAX_IN_MEMORY_ENTRIES = 10000
 
+# ── DDL (PostgreSQL and SQLite variants) ───────────────────────────────
+
+_DDL_POSTGRESQL = """
+CREATE TABLE IF NOT EXISTS audit_events (
+    id          SERIAL PRIMARY KEY,
+    task_id     TEXT NOT NULL,
+    event_type  TEXT NOT NULL,
+    timestamp   TEXT NOT NULL,
+    detail      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_task_id ON audit_events(task_id);
+"""
+
+_DDL_SQLITE = """
+CREATE TABLE IF NOT EXISTS audit_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     TEXT NOT NULL,
+    event_type  TEXT NOT NULL,
+    timestamp   TEXT NOT NULL,
+    detail      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_task_id ON audit_events(task_id);
+"""
+
 
 class AuditTrail:
     def __init__(self) -> None:
         self._entries: collections.deque[dict[str, Any]] = collections.deque(maxlen=_MAX_IN_MEMORY_ENTRIES)
-        from core.config import settings
-
-        self._db_path: str = settings.audit_db_path
+        self._db_initialized = False
 
     # ------------------------------------------------------------------
-    # SQLite lifecycle
+    # Database lifecycle
     # ------------------------------------------------------------------
 
-    async def init_db(self) -> None:
-        """Create the SQLite table and index on startup.  Idempotent."""
-        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
-            await db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_events (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id     TEXT NOT NULL,
-                    event_type  TEXT NOT NULL,
-                    timestamp   TEXT NOT NULL,
-                    detail      TEXT NOT NULL
-                )
-                """
-            )
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_task_id ON audit_events(task_id)")
-            await db.commit()
+    async def _ensure_db(self) -> None:
+        """Initialize the database table on first use. Idempotent."""
+        if self._db_initialized:
+            return
+        try:
+            from core.db import get_db
+            db = await get_db()
+            ddl = _DDL_POSTGRESQL if db.backend == "postgresql" else _DDL_SQLITE
+            await db.init_db(ddl)
+            self._db_initialized = True
+        except Exception as e:
+            log.warning("Audit DB init failed: %s", e)
 
     async def _write_to_db(self, entry: dict[str, Any]) -> None:
-        """Fire-and-forget SQLite write — never raises to caller."""
+        """Fire-and-forget database write — never raises to caller.
+
+        Retries up to 3 times with exponential backoff on transient failures.
+        """
         try:
-            async with aiosqlite.connect(self._db_path) as db:
-                await db.execute(
-                    "INSERT INTO audit_events (task_id, event_type, timestamp, detail) VALUES (?, ?, ?, ?)",
-                    (
-                        entry["task_id"],
-                        entry["event_type"],
-                        entry["timestamp"],
-                        json.dumps(entry.get("detail", {}), default=str),
-                    ),
-                )
-                await db.commit()
+            from core.db import get_db
+            db = await get_db()
+
+            sql = "INSERT INTO audit_events (task_id, event_type, timestamp, detail) VALUES ($1, $2, $3, $4)" if db.backend == "postgresql" else "INSERT INTO audit_events (task_id, event_type, timestamp, detail) VALUES (?, ?, ?, ?)"
+            params = (
+                entry["task_id"],
+                entry["event_type"],
+                entry["timestamp"],
+                json.dumps(entry.get("detail", {}), default=str),
+            )
+
+            for attempt in range(3):
+                try:
+                    await db.execute(sql, params)
+                    return
+                except Exception as e:
+                    if attempt == 2:
+                        log.warning(
+                            "Audit DB write failed after 3 attempts for task %s: %s",
+                            entry.get("task_id"),
+                            e,
+                        )
+                    else:
+                        await asyncio.sleep(0.1 * (2 ** attempt))
         except Exception as e:
-            log.warning("Audit SQLite write failed for task %s: %s", entry.get("task_id"), e)
+            log.warning("Audit DB write failed for task %s: %s", entry.get("task_id"), e)
 
     async def load_from_db(self, task_id: str) -> list[dict[str, Any]]:
         """
-        Fetch audit entries from SQLite for a given task_id.
-        Used as a fallback when the in-memory list is empty (e.g. after a restart).
+        Fetch audit entries from the database for a given task_id.
+        Used as a fallback when the in-memory deque is empty (e.g. after restart).
         """
         try:
-            async with aiosqlite.connect(self._db_path) as db:
-                async with db.execute(
-                    "SELECT event_type, timestamp, detail FROM audit_events WHERE task_id = ? ORDER BY id",
-                    (task_id,),
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                    return [
-                        {
-                            "task_id": task_id,
-                            "event_type": row[0],
-                            "timestamp": row[1],
-                            "detail": json.loads(row[2]),
-                        }
-                        for row in rows
-                    ]
+            from core.db import get_db
+            db = await get_db()
+
+            sql = "SELECT event_type, timestamp, detail FROM audit_events WHERE task_id = $1 ORDER BY id" if db.backend == "postgresql" else "SELECT event_type, timestamp, detail FROM audit_events WHERE task_id = ? ORDER BY id"
+            rows = await db.fetchall(sql, (task_id,))
+            return [
+                {
+                    "task_id": task_id,
+                    "event_type": row[0],
+                    "timestamp": row[1],
+                    "detail": json.loads(row[2]),
+                }
+                for row in rows
+            ]
         except Exception:
             return []
+
+    # ------------------------------------------------------------------
+    # Public API (unchanged)
+    # ------------------------------------------------------------------
 
     def record(
         self,
@@ -98,9 +142,15 @@ class AuditTrail:
         self._entries.append(entry)
         # Persist asynchronously without blocking the caller
         try:
-            asyncio.get_running_loop().create_task(self._write_to_db(entry))
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._safe_db_write(entry))
         except RuntimeError:
             pass  # No running event loop (unit tests, CLI scripts)
+
+    async def _safe_db_write(self, entry: dict[str, Any]) -> None:
+        """Write to DB with lazy initialization."""
+        await self._ensure_db()
+        await self._write_to_db(entry)
 
     def record_topology_decision(
         self,

@@ -90,6 +90,25 @@ async def plan_task(state: AgentState) -> dict:
     task_id = state.get("task_id", "")
     await emit_event(task_id, "planner_started", {"task": state["task"]})
 
+    # Resume case: steps already exist from previous topology.
+    # Skip re-planning — just advance past completed steps.
+    existing_steps = state.get("steps") or state.get("plan_steps") or []
+    completed_ids = state.get("completed_step_ids", [])
+    if existing_steps and completed_ids:
+        next_idx = max(completed_ids) + 1
+        if next_idx >= len(existing_steps):
+            # All steps completed — go to finalizer
+            return {
+                "current_step_index": next_idx,
+                "status": "executing",
+                "logs": [f"Resume: all {len(existing_steps)} steps already completed"],
+            }
+        return {
+            "current_step_index": next_idx,
+            "status": "executing",
+            "logs": [f"Resume: skipping to step {next_idx} ({len(completed_ids)} already done)"],
+        }
+
     # Pre-LLM budget check — skip planning if budget exhausted
     from core.budget import should_skip_llm
     if should_skip_llm(state):
@@ -190,6 +209,7 @@ async def plan_task(state: AgentState) -> dict:
 
     return {
         "steps": steps,
+        "plan_steps": steps,
         "current_step_index": 0,
         "status": "planning",
         "retry_count": 0,

@@ -52,8 +52,7 @@ POST /execute {task, budget_usd}
 ### 1. Install dependencies
 
 ```bash
-pip install -r requirements.txt
-pip install -r requirements-dev.txt  # for testing
+pip install -e ".[dev]"
 ```
 
 ### 2. Configure environment
@@ -74,17 +73,17 @@ redis-server
 ### 4. Start the server
 
 ```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8001 --reload
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 5. Open the frontend
 
-Navigate to [http://localhost:8001](http://localhost:8001)
+Navigate to [http://localhost:8000](http://localhost:8000)
 
 ### 6. Run a task
 
 ```bash
-curl -X POST http://localhost:8001/execute \
+curl -X POST http://localhost:8000/execute \
   -H "Content-Type: application/json" \
   -d '{"task": "What is 2+2?", "budget_usd": 0.10}'
 ```
@@ -162,7 +161,6 @@ multi_agent/
 │   ├── audit.py            # SQLite audit trail
 │   ├── events.py           # Redis event broadcaster
 │   ├── node_events.py      # emit_event helper
-│   ├── budget_interrupt.py # Mid-execution budget checkpoint
 │   └── redis_client.py     # Redis connection manager
 ├── agent/                   # Agent layer
 │   ├── state.py            # AgentState TypedDict
@@ -220,7 +218,7 @@ multi_agent/
 ## Running Tests
 
 ```bash
-# All tests (301 tests)
+# All tests (391 tests)
 pytest tests/ -v
 
 # Unit tests only (no server needed)

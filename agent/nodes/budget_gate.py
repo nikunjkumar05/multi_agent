@@ -16,7 +16,7 @@ from __future__ import annotations
 from enum import Enum
 
 from core.audit import get_audit_trail
-from core.budget import BudgetBand, BudgetTracker, TOPOLOGY_DEGRADATION_CHAIN, next_topology
+from core.budget import BudgetBand, BudgetTracker, next_topology
 from core.node_events import emit_event
 
 HARD_CAP_MULTIPLIER = 1.05  # Circuit breaker triggers at 105% of budget
@@ -27,17 +27,6 @@ class BudgetGateAction(str, Enum):
     PAUSE = "pause"
     SKIP_JUDGE = "skip_judge"
     EMERGENCY_SINGLE = "emergency_single"
-
-
-def _spent_band(spent_pct: float) -> str:
-    """Return the budget band name for a given spent percentage."""
-    if spent_pct < 70:
-        return "healthy"
-    if spent_pct < 90:
-        return "tier_downgrade"
-    if spent_pct < 100:
-        return "structural_degrade"
-    return "critical"
 
 
 def evaluate_gate(state: dict) -> BudgetGateAction:
@@ -76,8 +65,8 @@ async def budget_gate_node(state: dict) -> dict:
     LangGraph node: evaluate budget gate and interrupt if needed.
     Fires at synchronization barriers after LLM-invoking nodes.
     Syncs BudgetTracker with live consumed_cost/consumed_tokens so that
-    budget_interrupt.py and other consumers see correct band state.
-    Includes hard circuit breaker at 110% of budget.
+    band detection works correctly across all consumers.
+    Includes hard circuit breaker at 105% of budget.
     """
     from langgraph.types import interrupt
 
@@ -122,7 +111,7 @@ async def budget_gate_node(state: dict) -> dict:
     task_id = state.get("task_id", "")
     topology = state.get("topology", "single")
     spent_pct = (acc_cost / budget.max_cost_usd * 100) if budget and budget.max_cost_usd > 0 else 0.0
-    band = _spent_band(spent_pct)
+    band = budget.get_band().value
 
     if action == BudgetGateAction.PAUSE:
         to_topology = next_topology(topology)

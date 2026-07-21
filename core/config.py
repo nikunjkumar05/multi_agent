@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     rl_cost_efficiency_weight: float = 0.3  # Weight of cost efficiency in the reward signal
 
     # Audit persistence
-    audit_db_path: str = "./workspace/audit.db"
+    database_url: str | None = None  # PostgreSQL DSN (e.g. postgresql://user:pass@host/db). Falls back to SQLite if unset.
+    audit_db_path: str = "./workspace/audit.db"  # Used only when database_url is not set
 
 
 settings = Settings()

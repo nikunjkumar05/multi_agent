@@ -6,7 +6,7 @@ from agent.orchestrator import run_task_with_degradation
 from agent.state import AgentState
 from agent.topologies.builder import compile_graph, checkpointer
 from core.audit import get_audit_trail
-from core.budget import BudgetBand, BudgetTracker
+from core.budget import BudgetBand, BudgetTracker, get_band_from_state
 from core.degrader import degrade_topology
 from core.learning import record_task_result
 from core.node_events import emit_event
@@ -158,7 +158,7 @@ async def run_task(
             await record_task_result(
                 rl_policy=rl,
                 topology=final_topology,
-                budget_band=budget.get_band().value,
+                budget_band=get_band_from_state(result).value,
                 task=task,
                 quality_score=quality,
                 cost_usd=acc_cost,

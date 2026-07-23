@@ -20,3 +20,8 @@ workspace/*.db
 debug_*.py
 instance/
 workspace/
+opencode.json
+package.json
+package-lock.json
+scraped_data.csv
+server.js

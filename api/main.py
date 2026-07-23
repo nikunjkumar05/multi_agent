@@ -1,6 +1,13 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger = logging.getLogger("bamas")
 
-    await audit_trail.init_db()
+    await audit_trail._ensure_db()
 
     # Initialize RL policy SQLite schema
     redis = await get_redis()

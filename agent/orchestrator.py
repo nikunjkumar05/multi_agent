@@ -172,6 +172,66 @@ async def run_task_with_degradation(
         if budget_check is not None:
             return budget_check
 
+        # FAST PATH: If budget is >= 90% after projection, skip intermediate topologies
+        # and jump directly to single with skip_judge. This prevents rapid-fire
+        # degradation through fanout → supervisor → pipeline → single.
+        acc_cost_after = projected.get("consumed_cost", 0.0)
+        budget_obj = projected.get("budget")
+        if budget_obj and budget_obj.max_cost_usd > 0:
+            spent_pct_after = acc_cost_after / budget_obj.max_cost_usd
+            if spent_pct_after >= 0.90 and to_topology != "single":
+                log.warning(
+                    "Budget %.1f%% exhausted — jumping directly to single (skipping %s)",
+                    spent_pct_after * 100, to_topology,
+                )
+                # Project directly to single
+                try:
+                    from core.projections import project_state as _ps, validate_projected_state as _vp
+                    single_projected = _ps(projected, current_topology, "single")
+                    is_valid, err = _vp(single_projected, "single")
+                    if is_valid:
+                        projected = single_projected
+                        to_topology = "single"
+                    # If projection fails, continue with current projected state
+                except Exception as e:
+                    log.warning("Fast-path projection to single failed: %s — continuing with current state", e)
+
+                # Set skip_judge and topology for single
+                projected["skip_judge"] = True
+                projected["topology"] = "single"
+
+                # Emit single degradation event covering the full chain
+                await emit_event(
+                    task_id,
+                    "topology_degraded",
+                    {
+                        "from_topology": from_topology,
+                        "to_topology": "single",
+                        "band": interrupt_value.get("band", "unknown"),
+                        "reason": f"budget_exhausted_chain ({reason})",
+                        "degradation_number": degradation_count + 1,
+                        "consumed_cost": projected.get("consumed_cost", 0.0),
+                        "budget_remaining": _get_budget_remaining(projected),
+                    },
+                )
+                audit = get_audit_trail()
+                audit.record_degradation(
+                    task_id=task_id,
+                    from_topology=from_topology,
+                    to_topology="single",
+                    reason=f"Mid-execution: budget exhausted on {from_topology}, collapsed to single",
+                )
+
+                # Don't rebuild graph — continue with current topology's remaining steps
+                # The skip_judge flag will route to finalizer
+                current_topology = "single"
+                _sync_budget_tracker(projected)
+                projected["topology_history"] = [{"from": from_topology, "to": "single", "reason": "budget_exhausted_chain"}]
+                current_graph.update_state(config, projected, as_node=START)
+                degradation_count += 1
+                # Continue the loop — next ainvoke will run single topology
+                continue
+
         # Sync BudgetTracker with projected state
         _sync_budget_tracker(projected)
 

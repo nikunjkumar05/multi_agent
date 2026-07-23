@@ -344,7 +344,10 @@ async function pollTask(taskId) {
         statusBadge.textContent = "COMPLETE";
         statusBadge.className = "badge complete";
         const raw = task.final_result || "No result produced";
-        resultOutput.innerHTML = DOMPurify.sanitize(marked.parse(raw));
+        // Show topology info above result
+        const topoInfo = task.topology ? `<div class="result-topo-info">topology: ${task.topology}</div>` : "";
+        resultOutput.innerHTML = topoInfo;
+        await typeWriteResult(raw);
         loadAudit(taskId);
         renderCostSummary(collectedEvents);
         submitBtn.disabled = false;
@@ -716,6 +719,65 @@ function renderCostSummary(events) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ── Streaming Typewriter Effect ──────────────────────────────────────────────
+
+async function typeWriteResult(rawMarkdown) {
+  // 1. Show "thinking" state with blinking cursor immediately
+  resultOutput.innerHTML = '<span class="typing-cursor">Thinking</span>';
+
+  // 2. Thinking delay (simulates AI processing)
+  await sleep(500);
+
+  // 3. Parse markdown to HTML
+  const html = DOMPurify.sanitize(marked.parse(rawMarkdown));
+
+  // 4. Extract plain text for typewriter reveal
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const plainText = tmp.textContent || "";
+
+  // 5. If text is short (< 50 chars), show instantly
+  if (plainText.length < 50) {
+    resultOutput.innerHTML = html;
+    return;
+  }
+
+  // 6. Type out character by character
+  let displayed = "";
+  const totalChars = plainText.length;
+
+  for (let i = 0; i < totalChars; i++) {
+    displayed += plainText[i];
+
+    // Build visible text with cursor
+    const cursor = i < totalChars - 1 ? '<span class="typing-cursor"></span>' : "";
+    resultOutput.innerHTML = displayed + cursor;
+
+    // Variable speed: fast for spaces, normal for letters, pause for punctuation
+    const ch = plainText[i];
+    let delay;
+    if (ch === " " || ch === "\n") {
+      delay = 3;          // Fast for spaces/newlines
+    } else if (".!?;:".includes(ch)) {
+      delay = 40;         // Pause at sentence endings
+    } else if (ch === ",") {
+      delay = 20;         // Brief pause at commas
+    } else {
+      delay = 12;         // Normal typing speed
+    }
+
+    // Batch: skip intermediate renders for long text (render every 3 chars)
+    if (i % 5 !== 0 && i < totalChars - 1) {
+      continue;
+    }
+
+    await sleep(delay);
+  }
+
+  // 7. Final render: replace plain text with fully rendered markdown
+  resultOutput.innerHTML = html;
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────

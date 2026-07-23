@@ -304,6 +304,27 @@ pre {
 
 .hidden { display: none; }
 
+/* ── Typing cursor ─────────────────────────────────────────────────────────── */
+
+.typing-cursor::after {
+  content: "▌";
+  animation: blink 0.7s step-end infinite;
+  color: #58a6ff;
+  font-weight: 400;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.result-topo-info {
+  font-size: 0.75rem;
+  color: #8b949e;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #21262d;
+}
+
 /* ── Event log ─────────────────────────────────────────────────────────────── */
 
 .event-log {

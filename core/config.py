@@ -42,9 +42,14 @@ class Settings(BaseSettings):
     rl_quality_weight: float = 0.7  # Weight of quality score in the reward signal
     rl_cost_efficiency_weight: float = 0.3  # Weight of cost efficiency in the reward signal
 
-    # Audit persistence
+    # Database
     database_url: str | None = None  # PostgreSQL DSN (e.g. postgresql://user:pass@host/db). Falls back to SQLite if unset.
     audit_db_path: str = "./workspace/audit.db"  # Used only when database_url is not set
+    db_pool_min_size: int = 2
+    db_pool_max_size: int = 10
+
+    # Celery
+    celery_broker_url: str | None = None  # Defaults to redis_url if unset
 
 
 settings = Settings()

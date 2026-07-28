@@ -22,8 +22,10 @@ from api.routes import audit, estimate, execute, proxy, rl, tasks
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: initialise persistent resources on startup."""
     import logging
+    from agent.topologies.builder import init_checkpointer, close_checkpointer
     from core.audit import audit_trail
     from core.config import settings
+    from core.db import close_db, close_psycopg_pool
     from core.redis_client import get_redis
     from core.rl_policy import RLPolicy
 
@@ -37,6 +39,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         rl = RLPolicy(redis)
         await rl._ensure_db()
 
+    # Initialize LangGraph checkpointer (PostgreSQL or MemorySaver fallback)
+    await init_checkpointer()
+
     # Security warning for default JWT secret
     from core.config import DEFAULT_JWT_SECRET
     if settings.jwt_secret == DEFAULT_JWT_SECRET:
@@ -47,7 +52,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
     yield
-    # Shutdown hooks can be added here if needed
+
+    # Shutdown: close all persistent resources
+    await close_checkpointer()
+    await close_psycopg_pool()
+    await close_db()
 
 
 app = FastAPI(

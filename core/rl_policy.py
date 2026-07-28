@@ -3,9 +3,9 @@ RL Policy module — Contextual Thompson Sampling for topology selection.
 
 Production-grade implementation with:
 - Redis for fast reads (hot state)
-- SQLite for persistent storage (cold state + audit trail)
+- PostgreSQL/SQLite for persistent storage (cold state + audit trail)
 - Confidence-gated override to prevent wrong topology selections
-- Async-safe SQLite via aiosqlite for concurrent task access
+- Async-safe via core.db abstraction (supports both PostgreSQL and SQLite)
 """
 
 import json
@@ -13,7 +13,6 @@ import os
 import random
 from datetime import datetime
 
-import aiosqlite
 import redis.asyncio as aioredis
 
 TOPOLOGIES = ["single", "pipeline", "supervisor", "fanout", "ensemble"]
@@ -38,10 +37,42 @@ RL_MIN_CONFIDENCE_FOR_OVERRIDE = 0.85
 
 _DATA_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PERSIST_FILE = os.path.join(_DATA_DIR, "rl_policy.json")
-_SQLITE_DB = os.path.join(_DATA_DIR, "workspace", "rl_policy.db")
 
-# SQL schema — executed once on first use
-_SCHEMA_SQL = """
+# ── DDL schemas (dual-backend) ───────────────────────────────────────
+
+_DDL_POSTGRESQL = """
+CREATE TABLE IF NOT EXISTS rl_snapshots (
+    id SERIAL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    arms_json TEXT NOT NULL,
+    total_tasks INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON rl_snapshots(timestamp);
+
+CREATE TABLE IF NOT EXISTS rl_overrides (
+    id SERIAL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    task_id TEXT,
+    task TEXT,
+    llm_topology TEXT,
+    rl_topology TEXT,
+    confidence REAL,
+    task_type TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_overrides_ts ON rl_overrides(timestamp);
+CREATE INDEX IF NOT EXISTS idx_overrides_task_id ON rl_overrides(task_id);
+
+CREATE TABLE IF NOT EXISTS rl_rewards (
+    id SERIAL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    topology TEXT NOT NULL,
+    reward REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rewards_ts ON rl_rewards(timestamp);
+CREATE INDEX IF NOT EXISTS idx_rewards_topo ON rl_rewards(topology);
+"""
+
+_DDL_SQLITE = """
 CREATE TABLE IF NOT EXISTS rl_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
@@ -74,19 +105,62 @@ CREATE INDEX IF NOT EXISTS idx_rewards_topo ON rl_rewards(topology);
 """
 
 
+def _convert_params(sql: str, backend: str) -> str:
+    """Convert SQLite ? placeholders to PostgreSQL $N placeholders."""
+    if backend == "postgresql":
+        parts = sql.split("?")
+        result = parts[0]
+        for i, part in enumerate(parts[1:], 1):
+            result += f"${i}{part}"
+        return result
+    return sql
+
+
 class RLPolicy:
     def __init__(self, redis: aioredis.Redis, persist_path: str = _PERSIST_FILE) -> None:
         self.redis = redis
         self.persist_path = persist_path
         self.arms: dict[str, dict[str, float]] = {}
         self.total_tasks: int = 0
-        self._sqlite_path = _SQLITE_DB
         self._db_initialized = False
+
+    # ── DB helpers (via shared core.db abstraction) ────────────────────
+
+    async def _ensure_db(self) -> None:
+        """Initialize DB schema once per process lifetime."""
+        if self._db_initialized:
+            return
+        from core.db import get_db
+        db = await get_db()
+        ddl = _DDL_POSTGRESQL if db.backend == "postgresql" else _DDL_SQLITE
+        await db.init_db(ddl)
+        self._db_initialized = True
+
+    async def _execute(self, sql: str, params: tuple = ()) -> None:
+        """Execute a statement via the shared DB abstraction."""
+        from core.db import get_db
+        db = await get_db()
+        sql = _convert_params(sql, db.backend)
+        await db.execute(sql, params)
+
+    async def _fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
+        """Fetch all rows via the shared DB abstraction."""
+        from core.db import get_db
+        db = await get_db()
+        sql = _convert_params(sql, db.backend)
+        return await db.fetchall(sql, params)
+
+    async def _fetchone(self, sql: str, params: tuple = ()) -> tuple | None:
+        """Fetch a single row via the shared DB abstraction."""
+        from core.db import get_db
+        db = await get_db()
+        sql = _convert_params(sql, db.backend)
+        return await db.fetchone(sql, params)
 
     # ── Initialization ─────────────────────────────────────────────────
 
     async def load(self) -> None:
-        """Load RL state from Redis, falling back to file, then SQLite."""
+        """Load RL state from Redis, falling back to file, then DB."""
         if self.redis is None:
             self._load_from_file()
             return
@@ -109,21 +183,11 @@ class RLPolicy:
             else:
                 self.arms[topo] = {"alpha": 1.0, "beta": 1.0}
 
-        # Fallback chain: Redis → file → SQLite
+        # Fallback chain: Redis → file → DB
         if self.total_tasks == 0:
             self._load_from_file()
         if self.total_tasks == 0:
-            await self._load_from_sqlite()
-
-    async def _ensure_db(self) -> None:
-        """Initialize SQLite schema once per process lifetime."""
-        if self._db_initialized:
-            return
-        os.makedirs(os.path.dirname(self._sqlite_path), exist_ok=True)
-        async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-            await db.executescript(_SCHEMA_SQL)
-            await db.commit()
-        self._db_initialized = True
+            await self._load_from_db()
 
     # ── Feature extraction ─────────────────────────────────────────────
 
@@ -185,7 +249,7 @@ class RLPolicy:
     # ── Reward update ──────────────────────────────────────────────────
 
     async def reward(self, topology: str, quality: float, cost_efficiency: float) -> None:
-        """Update RL state in Redis and persist to SQLite."""
+        """Update RL state in Redis and persist to DB."""
         from core.config import settings
 
         combined = quality * settings.rl_quality_weight + cost_efficiency * settings.rl_cost_efficiency_weight
@@ -208,9 +272,9 @@ class RLPolicy:
         else:
             self.arms[topology]["beta"] += 1.0 - combined
 
-        # Persist to file and SQLite (async, non-blocking)
+        # Persist to file and DB (async, non-blocking)
         self._save_to_file()
-        await self._save_reward_to_sqlite(topology, combined)
+        await self._save_reward_to_db(topology, combined)
 
     # ── File persistence (fast fallback) ───────────────────────────────
 
@@ -230,47 +294,41 @@ class RLPolicy:
             f.write(json.dumps(data))
         os.replace(tmp, self.persist_path)
 
-    # ── SQLite persistence (durable + audit) ───────────────────────────
+    # ── DB persistence (durable + audit) ───────────────────────────────
 
-    async def _load_from_sqlite(self) -> None:
-        """Load RL state from the most recent SQLite snapshot."""
+    async def _load_from_db(self) -> None:
+        """Load RL state from the most recent DB snapshot."""
         try:
-            if not os.path.exists(self._sqlite_path):
-                return
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                row = await db.execute_fetchall(
-                    "SELECT arms_json, total_tasks FROM rl_snapshots ORDER BY id DESC LIMIT 1"
-                )
-                if row:
-                    self.arms = json.loads(row[0][0])
-                    self.total_tasks = row[0][1]
+            await self._ensure_db()
+            rows = await self._fetchall(
+                "SELECT arms_json, total_tasks FROM rl_snapshots ORDER BY id DESC LIMIT 1"
+            )
+            if rows:
+                self.arms = json.loads(rows[0][0])
+                self.total_tasks = rows[0][1]
         except Exception:
             pass
 
-    async def _save_reward_to_sqlite(self, topology: str, reward: float) -> None:
+    async def _save_reward_to_db(self, topology: str, reward: float) -> None:
         """Append a reward record for historical tracking."""
         try:
             await self._ensure_db()
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                await db.execute(
-                    "INSERT INTO rl_rewards (timestamp, topology, reward) VALUES (?, ?, ?)",
-                    (datetime.utcnow().isoformat(), topology, reward),
-                )
-                await db.commit()
+            await self._execute(
+                "INSERT INTO rl_rewards (timestamp, topology, reward) VALUES (?, ?, ?)",
+                (datetime.utcnow().isoformat(), topology, reward),
+            )
         except Exception:
-            pass  # SQLite errors should never crash the system
+            pass  # DB errors should never crash the system
 
     async def save_snapshot(self) -> int | None:
-        """Save current RL state as a snapshot. Returns snapshot ID."""
+        """Save current RL state as a snapshot. Returns snapshot ID (None for PostgreSQL)."""
         try:
             await self._ensure_db()
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                cursor = await db.execute(
-                    "INSERT INTO rl_snapshots (timestamp, arms_json, total_tasks) VALUES (?, ?, ?)",
-                    (datetime.utcnow().isoformat(), json.dumps(self.arms), self.total_tasks),
-                )
-                await db.commit()
-                return cursor.lastrowid
+            await self._execute(
+                "INSERT INTO rl_snapshots (timestamp, arms_json, total_tasks) VALUES (?, ?, ?)",
+                (datetime.utcnow().isoformat(), json.dumps(self.arms), self.total_tasks),
+            )
+            return None  # PostgreSQL doesn't return lastrowid via our abstraction
         except Exception:
             return None
 
@@ -280,25 +338,23 @@ class RLPolicy:
         Syncs to both Redis and file for consistency.
         """
         try:
-            if not os.path.exists(self._sqlite_path):
+            await self._ensure_db()
+
+            if snapshot_id:
+                rows = await self._fetchall(
+                    "SELECT arms_json, total_tasks FROM rl_snapshots WHERE id = ?",
+                    (snapshot_id,),
+                )
+            else:
+                rows = await self._fetchall(
+                    "SELECT arms_json, total_tasks FROM rl_snapshots ORDER BY id DESC LIMIT 1"
+                )
+
+            if not rows:
                 return False
 
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                if snapshot_id:
-                    row = await db.execute_fetchall(
-                        "SELECT arms_json, total_tasks FROM rl_snapshots WHERE id = ?",
-                        (snapshot_id,),
-                    )
-                else:
-                    row = await db.execute_fetchall(
-                        "SELECT arms_json, total_tasks FROM rl_snapshots ORDER BY id DESC LIMIT 1"
-                    )
-
-            if not row:
-                return False
-
-            self.arms = json.loads(row[0][0])
-            self.total_tasks = row[0][1]
+            self.arms = json.loads(rows[0][0])
+            self.total_tasks = rows[0][1]
 
             # Sync back to Redis (only if available)
             if self.redis is not None:
@@ -322,7 +378,7 @@ class RLPolicy:
 
     async def reset(self) -> bool:
         """
-        Full reset: flush Redis, truncate SQLite, reset arms to uniform priors.
+        Full reset: flush Redis, truncate DB, reset arms to uniform priors.
         Saves a fresh snapshot so rollback has a clean starting point.
 
         Writes fresh state BEFORE deleting old state. If anything fails
@@ -339,13 +395,11 @@ class RLPolicy:
                 pipe.set("rl_policy:total_tasks", 0)
                 await pipe.execute()
 
-            # Phase 2: Truncate SQLite and write fresh snapshot
+            # Phase 2: Truncate DB and write fresh snapshot
             await self._ensure_db()
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                await db.execute("DELETE FROM rl_snapshots")
-                await db.execute("DELETE FROM rl_overrides")
-                await db.execute("DELETE FROM rl_rewards")
-                await db.commit()
+            await self._execute("DELETE FROM rl_snapshots")
+            await self._execute("DELETE FROM rl_overrides")
+            await self._execute("DELETE FROM rl_rewards")
 
             # Phase 3: Now safe to flush old Redis keys (fresh keys already written)
             if self.redis is not None:
@@ -380,49 +434,48 @@ class RLPolicy:
         """Log an RL override decision for monitoring."""
         try:
             await self._ensure_db()
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                await db.execute(
-                    "INSERT INTO rl_overrides (timestamp, task_id, task, llm_topology, rl_topology, confidence, task_type) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (datetime.utcnow().isoformat(), task_id, task[:200], llm_topology, rl_topology, confidence, task_type),
-                )
-                await db.commit()
+            await self._execute(
+                "INSERT INTO rl_overrides (timestamp, task_id, task, llm_topology, rl_topology, confidence, task_type) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (datetime.utcnow().isoformat(), task_id, task[:200], llm_topology, rl_topology, confidence, task_type),
+            )
         except Exception:
             pass
 
     async def get_override_history(self, limit: int = 50) -> list[dict]:
         """Get recent RL override decisions."""
         try:
-            if not os.path.exists(self._sqlite_path):
-                return []
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                db.row_factory = aiosqlite.Row
-                cursor = await db.execute(
-                    "SELECT * FROM rl_overrides ORDER BY id DESC LIMIT ?", (limit,)
-                )
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+            await self._ensure_db()
+            rows = await self._fetchall(
+                "SELECT id, timestamp, task_id, task, llm_topology, rl_topology, confidence, task_type "
+                "FROM rl_overrides ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            return [
+                dict(zip(["id", "timestamp", "task_id", "task", "llm_topology", "rl_topology", "confidence", "task_type"], row))
+                for row in rows
+            ]
         except Exception:
             return []
 
     async def get_reward_history(self, topology: str | None = None, limit: int = 100) -> list[dict]:
         """Get reward history for monitoring."""
         try:
-            if not os.path.exists(self._sqlite_path):
-                return []
-            async with aiosqlite.connect(self._sqlite_path, timeout=10) as db:
-                db.row_factory = aiosqlite.Row
-                if topology:
-                    cursor = await db.execute(
-                        "SELECT * FROM rl_rewards WHERE topology = ? ORDER BY id DESC LIMIT ?",
-                        (topology, limit),
-                    )
-                else:
-                    cursor = await db.execute(
-                        "SELECT * FROM rl_rewards ORDER BY id DESC LIMIT ?", (limit,)
-                    )
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+            await self._ensure_db()
+            if topology:
+                rows = await self._fetchall(
+                    "SELECT id, timestamp, topology, reward FROM rl_rewards WHERE topology = ? ORDER BY id DESC LIMIT ?",
+                    (topology, limit),
+                )
+            else:
+                rows = await self._fetchall(
+                    "SELECT id, timestamp, topology, reward FROM rl_rewards ORDER BY id DESC LIMIT ?",
+                    (limit,),
+                )
+            return [
+                dict(zip(["id", "timestamp", "topology", "reward"], row))
+                for row in rows
+            ]
         except Exception:
             return []
 

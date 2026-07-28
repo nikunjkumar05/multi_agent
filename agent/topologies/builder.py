@@ -1,5 +1,5 @@
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import StateGraph
-from langgraph.checkpoint.memory import MemorySaver
 
 from agent.state import AgentState
 from agent.topologies.single import build_single_graph
@@ -16,7 +16,31 @@ _TOPOLOGY_BUILDERS = {
     "ensemble": build_ensemble_graph,
 }
 
-checkpointer = MemorySaver()
+checkpointer: BaseCheckpointSaver | None = None
+
+
+async def init_checkpointer() -> None:
+    """Initialize PostgreSQL checkpointer. Falls back to MemorySaver if unavailable."""
+    global checkpointer
+    from core.db import get_psycopg_pool
+
+    pool = await get_psycopg_pool()
+    if pool is not None:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        checkpointer = AsyncPostgresSaver(pool)
+        return
+
+    # Fallback: in-memory (no persistence across restarts)
+    from langgraph.checkpoint.memory import MemorySaver
+    checkpointer = MemorySaver()
+
+
+async def close_checkpointer() -> None:
+    """Close the checkpointer. Call on shutdown."""
+    global checkpointer
+    if checkpointer is not None and hasattr(checkpointer, "pool"):
+        await checkpointer.pool.close()
+    checkpointer = None
 
 
 def compile_graph(topology: str) -> StateGraph:

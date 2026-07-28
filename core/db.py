@@ -1,8 +1,12 @@
 """
 Async database abstraction — PostgreSQL (asyncpg) or SQLite (aiosqlite).
 
+Provides two PostgreSQL pools:
+- asyncpg pool: Used by audit trail, RL policy, task store (fast, binary protocol)
+- psycopg pool: Used by LangGraph checkpointer (required by langgraph-checkpoint-postgres)
+
 Usage:
-    from core.db import get_db, init_db
+    from core.db import get_db, init_db, get_psycopg_pool
     db = await get_db()
     await db.execute("INSERT ...", (param1,))
     rows = await db.fetchall("SELECT ...", (param1,))
@@ -73,7 +77,6 @@ class PostgresDB(AsyncDB):
 
     async def init_db(self, ddl: str) -> None:
         pool = await self._get_pool()
-        # DDL statements are not parameterized — execute directly
         async with pool.acquire() as conn:
             await conn.execute(ddl)
 
@@ -154,6 +157,52 @@ class SQLiteDB(AsyncDB):
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
+
+
+# ── psycopg pool (for LangGraph checkpointer) ────────────────────────
+
+_psycopg_pool: Any = None
+
+
+async def get_psycopg_pool() -> Any:
+    """Get or create psycopg connection pool (for LangGraph checkpointer).
+
+    This pool is SEPARATE from the asyncpg pool used by audit/RL/task store.
+    LangGraph's AsyncPostgresSaver requires psycopg (psycopg3), not asyncpg.
+    """
+    global _psycopg_pool
+    if _psycopg_pool is not None:
+        return _psycopg_pool
+
+    from core.config import settings
+
+    if not settings.database_url:
+        log.warning("DATABASE_URL not set — psycopg pool unavailable (LangGraph checkpointer will use MemorySaver)")
+        return None
+
+    try:
+        from psycopg_pool import AsyncConnectionPool
+        _psycopg_pool = AsyncConnectionPool(
+            settings.database_url,
+            min_size=settings.db_pool_min_size,
+            max_size=settings.db_pool_max_size,
+            open=False,
+        )
+        await _psycopg_pool.open()
+        log.info("psycopg pool opened: min=%d, max=%d", settings.db_pool_min_size, settings.db_pool_max_size)
+        return _psycopg_pool
+    except Exception:
+        log.exception("Failed to create psycopg pool")
+        return None
+
+
+async def close_psycopg_pool() -> None:
+    """Close the psycopg connection pool. Call on shutdown."""
+    global _psycopg_pool
+    if _psycopg_pool is not None:
+        await _psycopg_pool.close()
+        _psycopg_pool = None
+        log.info("psycopg pool closed")
 
 
 # ── Factory ───────────────────────────────────────────────────────────

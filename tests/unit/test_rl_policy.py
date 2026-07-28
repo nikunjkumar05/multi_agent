@@ -334,34 +334,33 @@ class TestReset:
     async def test_reset_truncates_sqlite(self, reset_policy):
         policy, _ = reset_policy
 
-        # Seed some data
+        # Seed some data via the shared DB abstraction
         await policy._ensure_db()
-        import aiosqlite
-        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
-            await db.execute("INSERT INTO rl_rewards (timestamp, topology, reward) VALUES (?, ?, ?)",
-                             ("2026-01-01", "pipeline", 0.8))
-            await db.execute("INSERT INTO rl_overrides (timestamp, task_id, task, llm_topology, rl_topology, confidence, task_type) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             ("2026-01-01", "t1", "test", "single", "pipeline", 0.9, "code"))
-            await db.commit()
+        await policy._execute(
+            "INSERT INTO rl_rewards (timestamp, topology, reward) VALUES (?, ?, ?)",
+            ("2026-01-01", "pipeline", 0.8),
+        )
+        await policy._execute(
+            "INSERT INTO rl_overrides (timestamp, task_id, task, llm_topology, rl_topology, confidence, task_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("2026-01-01", "t1", "test", "single", "pipeline", 0.9, "code"),
+        )
 
         # Verify data exists
-        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
-            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_rewards")
-            assert rows[0][0] == 1
-            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_overrides")
-            assert rows[0][0] == 1
+        rows = await policy._fetchall("SELECT COUNT(*) FROM rl_rewards")
+        assert rows[0][0] == 1
+        rows = await policy._fetchall("SELECT COUNT(*) FROM rl_overrides")
+        assert rows[0][0] == 1
 
         await policy.reset()
 
         # Verify data is gone
-        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
-            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_rewards")
-            assert rows[0][0] == 0
-            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_overrides")
-            assert rows[0][0] == 0
-            rows = await db.execute_fetchall("SELECT COUNT(*) FROM rl_snapshots")
-            assert rows[0][0] == 1
+        rows = await policy._fetchall("SELECT COUNT(*) FROM rl_rewards")
+        assert rows[0][0] == 0
+        rows = await policy._fetchall("SELECT COUNT(*) FROM rl_overrides")
+        assert rows[0][0] == 0
+        rows = await policy._fetchall("SELECT COUNT(*) FROM rl_snapshots")
+        assert rows[0][0] == 1
 
     @pytest.mark.asyncio
     async def test_reset_saves_fresh_snapshot(self, reset_policy):
@@ -369,16 +368,15 @@ class TestReset:
 
         await policy.reset()
 
-        import aiosqlite, json
-        async with aiosqlite.connect(policy._sqlite_path, timeout=10) as db:
-            rows = await db.execute_fetchall(
-                "SELECT arms_json, total_tasks FROM rl_snapshots ORDER BY id DESC LIMIT 1"
-            )
-            assert len(rows) == 1
-            arms = json.loads(rows[0][0])
-            assert rows[0][1] == 0
-            for topo in TOPOLOGIES:
-                assert arms[topo] == {"alpha": 1.0, "beta": 1.0}
+        import json
+        rows = await policy._fetchall(
+            "SELECT arms_json, total_tasks FROM rl_snapshots ORDER BY id DESC LIMIT 1"
+        )
+        assert len(rows) == 1
+        arms = json.loads(rows[0][0])
+        assert rows[0][1] == 0
+        for topo in TOPOLOGIES:
+            assert arms[topo] == {"alpha": 1.0, "beta": 1.0}
 
     @pytest.mark.asyncio
     async def test_reset_writes_fresh_file(self, reset_policy):

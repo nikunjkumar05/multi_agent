@@ -25,7 +25,7 @@ import asyncio
 import logging
 from typing import Any
 
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START
 
 from core.audit import get_audit_trail
@@ -44,7 +44,7 @@ async def run_task_with_degradation(
     initial_state: dict[str, Any],
     task_id: str,
     topology: str,
-    checkpointer: MemorySaver,
+    checkpointer: BaseCheckpointSaver,
 ) -> dict[str, Any]:
     """
     Run a topology graph with mid-execution degradation support.

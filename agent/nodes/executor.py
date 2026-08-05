@@ -103,7 +103,12 @@ async def execute_step(state: AgentState) -> dict:
     idx = state.get("current_step_index", 0)
     steps = state.get("steps", [])
     if idx >= len(steps):
-        return {"status": "completed", "errors": state.get("errors", []) + ["No steps to execute"]}
+        return {
+            "status": "completed",
+            "current_step_index": idx,
+            "completed_step_ids": state.get("completed_step_ids", []),
+            "errors": state.get("errors", []) + ["No steps to execute"],
+        }
 
     step = dict(steps[idx])
     step["status"] = "running"
@@ -145,7 +150,7 @@ async def execute_step(state: AgentState) -> dict:
     if should_skip_llm(state):
         budget = state.get("budget")
         spent_pct = round(state.get("consumed_cost", 0.0) / budget.max_cost_usd * 100, 1) if budget and budget.max_cost_usd > 0 else 0
-        step["status"] = "completed"
+        step["status"] = "skipped"
         step["result"] = "[Step skipped - budget exhausted]"
         updated_steps = list(steps)
         updated_steps[idx] = step

@@ -158,7 +158,7 @@ async def run_task(
             await record_task_result(
                 rl_policy=rl,
                 topology=final_topology,
-                budget_band=get_band_from_state(result).value,
+                budget_band=get_band_from_state({"budget": budget, "consumed_cost": acc_cost}).value,
                 task=task,
                 quality_score=quality,
                 cost_usd=acc_cost,

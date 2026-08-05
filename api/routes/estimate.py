@@ -89,6 +89,7 @@ class EstimateResponse(BaseModel):
     budget_usd: float
     budget_headroom_pct: float
     risk_level: str  # "LOW" | "MEDIUM" | "HIGH"
+    budget_warning: str | None = None
     alternatives_considered: list[dict[str, str]]
 
 
@@ -112,10 +113,18 @@ async def estimate_task(req: ExecuteRequest) -> EstimateResponse:
 
     if headroom > 30:
         risk = "LOW"
+        warning = None
     elif headroom > 10:
         risk = "MEDIUM"
+        warning = None
     else:
         risk = "HIGH"
+        warning = (
+            f"Budget likely insufficient. Estimated cost ${estimated_cost:.4f} "
+            f"uses {100-headroom:.0f}% of your ${req.budget_usd:.2f} budget. "
+            f"Steps may be skipped or topology degraded. "
+            f"Consider increasing budget to ${estimated_cost * 2:.2f} for reliable results."
+        )
 
     return EstimateResponse(
         topology=decision.topology,
@@ -125,5 +134,6 @@ async def estimate_task(req: ExecuteRequest) -> EstimateResponse:
         budget_usd=req.budget_usd,
         budget_headroom_pct=round(headroom, 1),
         risk_level=risk,
+        budget_warning=warning,
         alternatives_considered=decision.alternatives_considered,
     )

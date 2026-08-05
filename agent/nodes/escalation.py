@@ -6,10 +6,14 @@ from core.node_events import emit_event
 
 
 async def check_escalation(state: AgentState) -> dict[str, Any]:
+    budget = state.get("budget")
+    if budget is None:
+        return {"escalation_triggered": False}
+
     escalate = should_escalate(
         validator_confidence=state.get("validator_confidence", 1.0),
         reasoning_diverged=state.get("reasoning_diverged", False),
-        budget=state["budget"],
+        budget=budget,
     )
 
     task_id = state.get("task_id", "")

@@ -51,6 +51,61 @@ VALIDATOR_PROMPTS = {
     ),
 }
 
+import re
+
+
+def _heuristic_validate(result_text: str, step_description: str) -> tuple[float, bool, list[str]]:
+    """Zero-cost heuristic validation when budget is too low for LLM validation.
+
+    Returns (confidence, reasoning_diverged, issues).
+    """
+    issues = []
+
+    if not result_text or not result_text.strip():
+        return 0.1, True, ["Empty output"]
+
+    text = result_text.strip()
+
+    # Check for error markers
+    error_markers = ["[Step skipped", "[Error:", "[Failed", "[LLM call timed out", "Traceback (most recent call last)"]
+    for marker in error_markers:
+        if marker in text:
+            issues.append(f"Contains error marker: {marker}")
+
+    # Check minimum length (a meaningful result should be >50 chars)
+    if len(text) < 50:
+        issues.append(f"Very short output ({len(text)} chars)")
+
+    # Check for code-specific markers when task is code-related
+    code_keywords = ["def ", "class ", "function", "return", "import"]
+    step_lower = step_description.lower()
+    is_code_task = any(kw in step_lower for kw in ["code", "function", "implement", "write", "script", "class"])
+    if is_code_task:
+        has_code = any(kw in text for kw in code_keywords)
+        if not has_code:
+            issues.append("Code task but no code constructs found in output")
+        # Check for syntax error indicators
+        if "SyntaxError" in text or "IndentationError" in text:
+            issues.append("Contains Python syntax errors")
+
+    # Check for math-specific markers
+    is_math_task = any(kw in step_lower for kw in ["calculate", "compute", "solve", "math", "what is"])
+    if is_math_task:
+        # Check if there's a numeric answer
+        has_number = bool(re.search(r'\d+', text))
+        if not has_number:
+            issues.append("Math task but no numeric result found")
+
+    # Compute confidence
+    if issues:
+        confidence = max(0.2, 0.7 - len(issues) * 0.15)
+    else:
+        confidence = 0.75  # Heuristic can't be higher than 0.75
+
+    diverged = len(issues) >= 2 or any("error" in i.lower() for i in issues)
+
+    return confidence, diverged, issues
+
 
 async def validate_result(state: AgentState) -> dict:
     idx = state.get("current_step_index", 0)
@@ -59,7 +114,15 @@ async def validate_result(state: AgentState) -> dict:
 
     last_idx = idx - 1
     if last_idx < 0 or last_idx >= len(steps):
-        return {"validator_confidence": 1.0, "reasoning_diverged": False, "status": "validating"}
+        return {
+            "validator_confidence": 1.0,
+            "reasoning_diverged": False,
+            "validation_skipped": False,
+            "status": "validating",
+            "consumed_tokens": 0,
+            "consumed_cost": 0.0,
+            "logs": ["Validation: no step to validate (index out of bounds)"],
+        }
 
     step = steps[last_idx]
     result_text = step_results.get(step["step_id"], step.get("result", ""))
@@ -69,18 +132,24 @@ async def validate_result(state: AgentState) -> dict:
     if budget and budget.max_cost_usd > 0:
         spent_pct = (acc_cost / budget.max_cost_usd) * 100
         if spent_pct >= 90:
+            # Instead of skipping: use zero-cost heuristic validation
             task_id = state.get("task_id", "")
-            await emit_event(task_id, "validation_skipped", {
-                "reason": "budget_critical",
+            confidence, diverged, issues = _heuristic_validate(result_text, step.get("description", ""))
+            await emit_event(task_id, "validation_heuristic", {
+                "confidence": confidence,
+                "diverged": diverged,
+                "issues": issues,
                 "spent_pct": round(spent_pct, 1),
             })
             return {
-                "validator_confidence": 0.5,
-                "reasoning_diverged": False,
+                "validator_confidence": confidence,
+                "reasoning_diverged": diverged,
+                "validation_skipped": False,
+                "validation_heuristic": True,
                 "status": "validating",
                 "consumed_tokens": 0,
                 "consumed_cost": 0.0,
-                "logs": [f"Validation skipped - budget critical ({spent_pct:.0f}% spent)"],
+                "logs": [f"Validation: HEURISTIC (budget at {spent_pct:.0f}%), confidence={confidence:.2f}, issues={issues}"],
             }
 
     task_type = detect_task_type(state["task"])
@@ -101,17 +170,24 @@ async def validate_result(state: AgentState) -> dict:
     try:
         response = await llm.ainvoke(messages)
     except Exception as e:
+        # LLM failed — fall back to heuristic validation
         task_id = state.get("task_id", "")
-        await emit_event(task_id, "validation_skipped", {
+        confidence, diverged, issues = _heuristic_validate(result_text, step.get("description", ""))
+        await emit_event(task_id, "validation_heuristic", {
+            "confidence": confidence,
+            "diverged": diverged,
+            "issues": issues,
             "reason": f"llm_error: {e}",
         })
         return {
-            "validator_confidence": 0.5,
-            "reasoning_diverged": False,
+            "validator_confidence": confidence,
+            "reasoning_diverged": diverged,
+            "validation_skipped": False,
+            "validation_heuristic": True,
             "status": "validating",
             "consumed_tokens": 0,
             "consumed_cost": 0.0,
-            "logs": [f"Validation skipped - LLM error: {e}"],
+            "logs": [f"Validation: HEURISTIC (LLM error: {e}), confidence={confidence:.2f}"],
         }
 
     val_tokens = estimate_tokens(response)
@@ -144,6 +220,7 @@ async def validate_result(state: AgentState) -> dict:
     return {
         "validator_confidence": confidence,
         "reasoning_diverged": diverged,
+        "validation_skipped": False,
         "status": "validating",
         "consumed_tokens": val_tokens,
         "consumed_cost": val_cost,

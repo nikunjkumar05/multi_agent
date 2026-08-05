@@ -33,6 +33,12 @@ async def ensemble_judge(state: AgentState) -> dict:
             agent_name = f"Agent {k.upper()}" if len(k) == 1 else k.replace("agent_", "Agent ").upper()
             agent_outputs.append(f"{agent_name} output:\n{v}")
 
+    # Also handle fanout integer step keys — combine all step results
+    if not agent_outputs:
+        for k, v in step_results.items():
+            if isinstance(k, int) and v:
+                agent_outputs.append(f"Step {k}:\n{v}")
+
     if agent_outputs:
         executor_outputs_str = "\n\n".join(agent_outputs)
     else:
@@ -44,10 +50,11 @@ async def ensemble_judge(state: AgentState) -> dict:
         executor_outputs_str = f"Executor output:\n{last_result}"
 
     # If all agent outputs are error messages, don't call LLM — pick the best one
-    all_failed = all(
-        isinstance(v, str) and v.startswith("[Agent") and v.endswith("]")
-        for v in step_results.values()
-        if isinstance(v, str)
+    # Check that there are string values to inspect (empty generator returns True — that's wrong)
+    string_values = [v for v in step_results.values() if isinstance(v, str)]
+    all_failed = (
+        len(string_values) > 0
+        and all(v.startswith("[Agent") and v.endswith("]") for v in string_values)
     )
 
     task_id = state.get("task_id", "")

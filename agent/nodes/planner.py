@@ -15,6 +15,48 @@ log = logging.getLogger(__name__)
 
 PLANNER_TIMEOUT = 60
 
+def _budget_adjusted_step_count(desired: int, budget, tier: str) -> int:
+    """Reduce step count if budget can't support the desired number of steps.
+
+    Cost model per step:
+    - Executor LLM call: ~500 tokens output + ~200 tokens input = ~700 tokens
+    - Validator LLM call: ~300 tokens output
+    - Judge (amortized): ~200 tokens output
+    Total per step: ~1200 tokens
+
+    We need budget for: planner (1 call) + N steps × executor + N steps × validator + judge (1 call)
+    """
+    if budget is None or budget.max_cost_usd <= 0:
+        return desired
+
+    from core.config import settings
+    cost_per_1k = settings.tier_cost_per_1k_tokens.get(tier, 0.001)
+
+    # Estimate cost per step: executor (~700 tok) + validator (~300 tok) = ~1000 tokens
+    # Plus amortized judge (~200 tok) and planner overhead
+    tokens_per_step = 1000  # executor + validator
+    fixed_overhead_tokens = 1500  # planner + judge
+    cost_per_step = (tokens_per_step / 1000.0) * cost_per_1k
+    fixed_cost = (fixed_overhead_tokens / 1000.0) * cost_per_1k
+
+    remaining = budget.max_cost_usd - budget.consumed_cost
+    if remaining <= fixed_cost:
+        return 1  # Only enough for 1 step
+
+    available_for_steps = remaining - fixed_cost
+    max_steps_by_budget = max(1, int(available_for_steps / cost_per_step)) if cost_per_step > 0 else desired
+
+    adjusted = min(desired, max_steps_by_budget)
+
+    if adjusted < desired:
+        log.info(
+            "Budget-adjusted steps: %d → %d (budget=$%.4f, remaining=$%.4f, cost_per_step=$%.6f)",
+            desired, adjusted, budget.max_cost_usd, remaining, cost_per_step,
+        )
+
+    return adjusted
+
+
 TRIVIAL_KEYWORDS = {
     "hi", "hello", "hey", "thanks", "thank you", "bye", "goodbye",
     "yes", "no", "ok", "okay", "sure", "help",
@@ -121,18 +163,22 @@ async def plan_task(state: AgentState) -> dict:
         })
         return {
             "steps": [fallback_step],
+            "plan_steps": [fallback_step],
             "current_step_index": 0,
-            "status": "planning",
+            "status": "executing",
             "retry_count": 0,
             "consumed_tokens": 0,
             "consumed_cost": 0.0,
             "logs": [f"Planner skipped - budget exhausted ({spent_pct}% spent), using single-step fallback"],
         }
 
-    step_count = analyze_task_complexity(state["task"])
-
     tier = state["decision"].model_tiers.get("planner", "standard")
     llm = create_llm(tier)
+
+    # Budget-aware step count: scale steps to what the budget can support
+    budget = state.get("budget")
+    desired_steps = analyze_task_complexity(state["task"])
+    step_count = _budget_adjusted_step_count(desired_steps, budget, tier)
 
     local_tokens = 0
     local_cost = 0.0

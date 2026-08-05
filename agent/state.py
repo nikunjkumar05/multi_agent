@@ -68,6 +68,8 @@ class AgentState(TypedDict, total=False):
     # Escalation & validation
     validator_confidence: float | None
     reasoning_diverged: bool
+    validation_skipped: bool
+    validation_skip_reason: str | None
     skip_judge: bool
     escalation_triggered: bool
 

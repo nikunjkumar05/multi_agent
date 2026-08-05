@@ -64,12 +64,21 @@ async def execute(req: ExecuteRequest, bg: BackgroundTasks) -> TaskStatusRespons
         headroom_pct = max(0.0, 100.0 * (1.0 - estimated_cost / req.budget_usd))
         if headroom_pct > 30:
             risk = "LOW"
+            warning = None
         elif headroom_pct > 10:
             risk = "MEDIUM"
+            warning = None
         else:
             risk = "HIGH"
+            warning = (
+                f"Budget likely insufficient. Estimated cost ${estimated_cost:.4f} "
+                f"uses {100-headroom_pct:.0f}% of your ${req.budget_usd:.2f} budget. "
+                f"Steps may be skipped or topology degraded. "
+                f"Consider increasing budget to ${estimated_cost * 2:.2f} for reliable results."
+            )
     else:
         risk = "HIGH"
+        warning = "Budget is zero — execution will use fallback modes only."
 
     _tasks[task_id] = TaskStatusResponse(
         task_id=task_id,
@@ -78,6 +87,7 @@ async def execute(req: ExecuteRequest, bg: BackgroundTasks) -> TaskStatusRespons
         topology=decision.topology,
         estimated_cost=round(estimated_cost, 4),
         risk_level=risk,
+        budget_warning=warning,
         logs=["Task queued"],
     )
 

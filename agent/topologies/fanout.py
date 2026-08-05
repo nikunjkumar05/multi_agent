@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agent.nodes.budget_gate import budget_gate_node
 from agent.nodes.entry_router import entry_router_node
+from agent.nodes.finalizer import finalize_result
 from agent.nodes.judge import ensemble_judge
 from agent.nodes.planner import plan_task
 from agent.state import AgentState
@@ -174,6 +175,7 @@ def build_fanout_graph() -> StateGraph:
     builder.add_node("aggregator", aggregator_node)
     builder.add_node("judge", ensemble_judge)
     builder.add_node("budget_gate_post_judge", budget_gate_node)
+    builder.add_node("finalizer", finalize_result)
 
     builder.add_edge(START, "entry_router")
     builder.add_edge("entry_router", "planner")
@@ -184,6 +186,7 @@ def build_fanout_graph() -> StateGraph:
     builder.add_edge("budget_gate", "aggregator")
     builder.add_edge("aggregator", "judge")
     builder.add_edge("judge", "budget_gate_post_judge")
-    builder.add_edge("budget_gate_post_judge", END)
+    builder.add_edge("budget_gate_post_judge", "finalizer")
+    builder.add_edge("finalizer", END)
 
     return builder

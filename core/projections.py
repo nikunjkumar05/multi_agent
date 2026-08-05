@@ -38,9 +38,22 @@ def _assert_no_annotated_fields(result: dict[str, Any], edge: str) -> dict[str, 
 # ── Projection Functions ──────────────────────────────────────────────
 
 def project_ensemble_to_fanout(state: dict[str, Any]) -> dict[str, Any]:
-    """ensemble → fanout: clear agent-specific keys. step_results preserved by checkpointer."""
+    """ensemble → fanout: carry agent results as prior_context, clear agent-specific keys."""
+    agent_results = []
+    for key in ("agent_a_result", "agent_b_result", "agent_c_result"):
+        result = state.get(key)
+        if result and isinstance(result, dict):
+            output = result.get("output", "")
+            if output:
+                agent_results.append(output)
+
+    prior_context = None
+    if agent_results:
+        prior_context = "Ensemble agent outputs from prior execution:\n" + "\n\n---\n\n".join(agent_results)
+
     return _assert_no_annotated_fields({
         "topology": "fanout",
+        "prior_context": prior_context,
         "_worker_assignments": None,
         "fanout_worker_results": None,
         "agent_a_result": None,
@@ -50,7 +63,7 @@ def project_ensemble_to_fanout(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def project_ensemble_to_supervisor(state: dict[str, Any]) -> dict[str, Any]:
-    """ensemble → supervisor: chain through fanout."""
+    """ensemble → supervisor: chain through fanout, preserving agent results."""
     fanout_state = project_ensemble_to_fanout(state)
     return _assert_no_annotated_fields({
         **fanout_state,
@@ -61,7 +74,7 @@ def project_ensemble_to_supervisor(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def project_ensemble_to_pipeline(state: dict[str, Any]) -> dict[str, Any]:
-    """ensemble → pipeline: chain through fanout→supervisor."""
+    """ensemble → pipeline: chain through fanout→supervisor, preserving agent results."""
     supervisor_state = project_ensemble_to_supervisor(state)
     return _assert_no_annotated_fields({
         **supervisor_state,
@@ -176,9 +189,18 @@ def project_supervisor_to_single(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def project_pipeline_to_single(state: dict[str, Any]) -> dict[str, Any]:
-    """pipeline → single: trivial — topology_history update only."""
+    """pipeline → single: carry forward completed step results as prior_context."""
+    step_results = state.get("step_results", {})
+    completed = {k: v for k, v in step_results.items() if v is not None}
+
+    prior_context = None
+    if completed:
+        summaries = [f"Step {k}: {v}" for k, v in completed.items()]
+        prior_context = "Pipeline work completed before degradation:\n" + "\n".join(summaries)
+
     return _assert_no_annotated_fields({
         "topology": "single",
+        "prior_context": prior_context,
     }, "pipeline→single")
 
 

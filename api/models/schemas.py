@@ -17,6 +17,10 @@ class TaskStatusResponse(BaseModel):
     logs: list[str] = []
     estimated_cost: float | None = None
     risk_level: str | None = None
+    budget_warning: str | None = None
+    degradation_count: int | None = None
+    consumed_tokens: int | None = None
+    consumed_cost: float | None = None
 
 
 class AuditResponse(BaseModel):

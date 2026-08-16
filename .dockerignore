@@ -12,4 +12,7 @@ tests/
 .ruff_cache
 .pytest_cache
 docs/
-*.md
+docs/
+Implementation.md
+temp_plan.md
+bamas.pdf

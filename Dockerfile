@@ -1,11 +1,16 @@
 FROM python:3.12-slim AS builder
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+COPY pyproject.toml README.md ./
+COPY core/ core/
+COPY agent/ agent/
+COPY api/ api/
+COPY cli/ cli/
+RUN pip install --no-cache-dir .
 FROM python:3.12-slim
 RUN useradd --create-home appuser
 WORKDIR /app
-COPY --from=builder /install /usr/local
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 RUN chown -R appuser:appuser /app
 USER appuser

@@ -20,7 +20,7 @@ You can:
 
 Return the BEST final result as plain text. Be concise and accurate."""
 
-_JUDGE_TIMEOUT = 90
+_JUDGE_TIMEOUT = 60
 
 
 async def ensemble_judge(state: AgentState) -> dict:
@@ -100,6 +100,45 @@ async def ensemble_judge(state: AgentState) -> dict:
             }
 
     tier = state["decision"].model_tiers.get("judge", "frontier")
+
+    # Dynamic budget guard: estimate judge call cost before invoking LLM.
+    # This prevents budget overruns when the judge uses expensive models (e.g. frontier)
+    # and the remaining budget is small. Without this, a single judge call can consume
+    # 5-10x the remaining budget.
+    from core.config import settings
+    cost_per_1k = settings.tier_cost_per_1k_tokens.get(tier, 0.001)
+    # Estimate input tokens: characters / 4 (rough approximation)
+    input_chars = len(state.get("task", "")) + len(executor_outputs_str)
+    est_input_tokens = max(1, input_chars // 4)
+    # Estimate output tokens: frontier models tend to produce longer outputs
+    est_output_multiplier = {"cheap": 0.3, "standard": 0.5, "frontier": 0.8}.get(tier, 0.5)
+    est_output_tokens = max(100, int(est_input_tokens * est_output_multiplier))
+    est_total_tokens = est_input_tokens + est_output_tokens
+    est_cost = (est_total_tokens / 1000.0) * cost_per_1k
+    remaining_budget = budget.max_cost_usd - acc_cost
+
+    if est_cost > remaining_budget and remaining_budget > 0:
+        log.warning(
+            "Judge skipped: estimated cost $%.6f exceeds remaining budget $%.6f "
+            "(input=%d tokens, output=%d tokens, tier=%s)",
+            est_cost, remaining_budget, est_input_tokens, est_output_tokens, tier,
+        )
+        await emit_event(task_id, "judge_skipped", {
+            "reason": "estimated_cost_exceeds_budget",
+            "estimated_cost": round(est_cost, 6),
+            "remaining_budget": round(remaining_budget, 6),
+            "tier": tier,
+        })
+        return {
+            "judge_output": executor_outputs_str,
+            "final_output": executor_outputs_str,
+            "final_result": executor_outputs_str,
+            "status": "completed",
+            "consumed_tokens": 0,
+            "consumed_cost": 0.0,
+            "logs": [f"Judge skipped - estimated cost ${est_cost:.4f} exceeds remaining budget ${remaining_budget:.4f}"],
+        }
+
     llm = create_llm(tier, temperature=0.3)
 
     messages = [

@@ -318,9 +318,23 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
     executed_code_hashes: set[int] = set()
     loop_tokens = 0
     loop_cost = 0.0
-    _LLM_TIMEOUT = 100  # per-call timeout (seconds)
+    _LLM_TIMEOUT = 60  # per-call timeout (seconds)
 
     for _iteration in range(MAX_TOOL_ITERATIONS):
+        # Budget check inside loop — break early if exhausted
+        from core.budget import should_skip_llm
+        if should_skip_llm(state, threshold=0.85):
+            last_content = ""
+            for msg in reversed(tool_messages):
+                if isinstance(msg, AIMessage) and msg.content:
+                    last_content = _extract_text(msg.content)
+                    break
+            if not last_content:
+                last_content = "\n".join(
+                    str(m.content)[:500] for m in tool_messages if isinstance(m, ToolMessage)
+                )
+            return str(last_content)[:1000] + "\n\n[Budget exhausted — tool loop stopped]", loop_tokens, loop_cost
+
         try:
             response = await asyncio.wait_for(
                 llm.ainvoke(messages + tool_messages),

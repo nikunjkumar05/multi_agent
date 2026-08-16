@@ -4,7 +4,7 @@ from typing import Any
 
 from agent.orchestrator import run_task_with_degradation
 from agent.state import AgentState
-from agent.topologies.builder import compile_graph, checkpointer
+from agent.topologies.builder import compile_graph, get_checkpointer
 from core.audit import get_audit_trail
 from core.budget import BudgetBand, BudgetTracker, get_band_from_state
 from core.degrader import degrade_topology
@@ -102,7 +102,7 @@ async def run_task(
             initial_state=initial_state,
             task_id=task_id,
             topology=degraded_topology,
-            checkpointer=checkpointer,
+            checkpointer=get_checkpointer(),
         )
     except Exception as e:
         log.exception("Task %s failed in orchestrator", task_id)

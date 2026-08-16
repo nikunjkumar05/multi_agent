@@ -23,7 +23,7 @@ ENSEMBLE_PROMPTS = [
 ENSEMBLE_ROLES = ["analytic", "creative", "domain_expert"]
 ENSEMBLE_TIERS = ["standard", "standard", "frontier"]
 
-_AGENT_TIMEOUT = 90  # hard timeout per agent (seconds)
+_AGENT_TIMEOUT = 60  # hard timeout per agent (seconds)
 
 
 def ensemble_dispatcher(state: AgentState) -> dict:

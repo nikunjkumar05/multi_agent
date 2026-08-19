@@ -5,7 +5,7 @@ from core.config import settings
 
 ModelTier = Literal["cheap", "standard", "frontier"]
 
-TOPOLOGY_DEGRADATION_CHAIN = ["ensemble", "fanout", "supervisor", "pipeline", "single"]
+TOPOLOGY_DEGRADATION_CHAIN = ["ensemble", "fanout", "feedback", "supervisor", "pipeline", "single"]
 
 
 class BudgetBand(str, Enum):

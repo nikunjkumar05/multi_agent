@@ -90,6 +90,11 @@ class AgentState(TypedDict, total=False):
     supervisor_remaining_tasks: list[str] | None
     supervisor_completed_tasks: list[dict] | None
 
+    # Feedback topology-specific (optional)
+    feedback_iteration: int
+    critic_accepted: bool
+    critic_feedback: str | None
+
     # Error & logs
     error: str | None
     errors: Annotated[list[str], merge_errors]

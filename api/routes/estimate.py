@@ -28,41 +28,43 @@ from api.middleware.auth import require_auth
 from api.models.schemas import ExecuteRequest
 from core.budget import BudgetTracker
 from core.config import settings
+from core.llm import estimate_cost_from_tokens
 from core.optimizer import CostTierOptimizer
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
 # Rough token estimates (in thousands) per role per topology
-_TOPOLOGY_TOKEN_PROFILE: dict[str, dict[str, float]] = {
+# Split into input/output: ~80% input, ~20% output
+_TOPOLOGY_TOKEN_PROFILE: dict[str, dict[str, tuple[float, float]]] = {
     "single": {
-        "planner": 0.5,
-        "executor": 1.0,
-        "validator": 0.5,
-        "judge": 0.0,
+        "planner": (0.4, 0.1),
+        "executor": (0.8, 0.2),
+        "validator": (0.4, 0.1),
+        "judge": (0.0, 0.0),
     },
     "pipeline": {
-        "planner": 0.5,
-        "executor": 1.0,
-        "validator": 0.5,
-        "judge": 1.0,
+        "planner": (0.4, 0.1),
+        "executor": (0.8, 0.2),
+        "validator": (0.4, 0.1),
+        "judge": (0.8, 0.2),
     },
     "supervisor": {
-        "planner": 0.5,
-        "executor": 2.0,  # supervisor + 2 workers averaged
-        "validator": 0.5,
-        "judge": 1.5,
+        "planner": (0.4, 0.1),
+        "executor": (1.6, 0.4),  # supervisor + 2 workers averaged
+        "validator": (0.4, 0.1),
+        "judge": (1.2, 0.3),
     },
     "fanout": {
-        "planner": 0.5,
-        "executor": 3.0,  # 3 parallel workers
-        "validator": 0.5,
-        "judge": 1.5,
+        "planner": (0.4, 0.1),
+        "executor": (2.4, 0.6),  # 3 parallel workers
+        "validator": (0.4, 0.1),
+        "judge": (1.2, 0.3),
     },
     "ensemble": {
-        "planner": 0.5,
-        "executor": 3.0,  # 3 specialist agents
-        "validator": 0.5,
-        "judge": 2.5,
+        "planner": (0.4, 0.1),
+        "executor": (2.4, 0.6),  # 3 specialist agents
+        "validator": (0.4, 0.1),
+        "judge": (2.0, 0.5),
     },
 }
 
@@ -70,14 +72,16 @@ _TOPOLOGY_TOKEN_PROFILE: dict[str, dict[str, float]] = {
 def _estimate_cost(topology: str, model_tiers: dict[str, str]) -> float:
     """
     Estimate USD cost for a single task run given topology + model tier mapping.
-    Uses settings.tier_cost_per_1k_tokens for pricing.
+    Paper Eq. 1: c_i = T_in * P_in + T_out * P_out
     """
     profile = _TOPOLOGY_TOKEN_PROFILE.get(topology, _TOPOLOGY_TOKEN_PROFILE["single"])
     total = 0.0
-    for role, k_tokens in profile.items():
+    for role, (input_k, output_k) in profile.items():
         tier = model_tiers.get(role, "standard")
-        price_per_k = settings.tier_cost_per_1k_tokens.get(tier, 0.001)
-        total += k_tokens * price_per_k
+        # Convert from thousands to actual tokens
+        input_tokens = int(input_k * 1000)
+        output_tokens = int(output_k * 1000)
+        total += estimate_cost_from_tokens(input_tokens, output_tokens, tier)
     return round(total, 6)
 
 

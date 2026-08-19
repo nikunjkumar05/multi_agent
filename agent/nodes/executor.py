@@ -323,7 +323,7 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
     for _iteration in range(MAX_TOOL_ITERATIONS):
         # Budget check inside loop — break early if exhausted
         from core.budget import should_skip_llm
-        if should_skip_llm(state, threshold=0.85):
+        if should_skip_llm(state, threshold=0.75):
             last_content = ""
             for msg in reversed(tool_messages):
                 if isinstance(msg, AIMessage) and msg.content:

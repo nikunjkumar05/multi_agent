@@ -38,22 +38,26 @@ class TestEstimateCost:
         response = MagicMock()
         response.usage_metadata.total_tokens = 1000
         cost = estimate_cost(response, "cheap")
-        assert cost == pytest.approx(0.0002, rel=1e-6)
+        # Paper Eq. 1: 800 input * $0.0001/1k + 200 output * $0.0004/1k = $0.00008 + $0.00008
+        assert cost == pytest.approx(0.00016, rel=1e-6)
 
     def test_standard_tier(self):
         response = MagicMock()
         response.usage_metadata.total_tokens = 1000
         cost = estimate_cost(response, "standard")
-        assert cost == pytest.approx(0.001, rel=1e-6)
+        # 800 * $0.0003/1k + 200 * $0.001/1k = $0.00024 + $0.0002
+        assert cost == pytest.approx(0.00044, rel=1e-6)
 
     def test_frontier_tier(self):
         response = MagicMock()
         response.usage_metadata.total_tokens = 1000
         cost = estimate_cost(response, "frontier")
-        assert cost == pytest.approx(0.008, rel=1e-6)
+        # 800 * $0.002/1k + 200 * $0.006/1k = $0.0016 + $0.0012
+        assert cost == pytest.approx(0.0028, rel=1e-6)
 
     def test_half_thousand_tokens(self):
         response = MagicMock()
         response.usage_metadata.total_tokens = 500
         cost = estimate_cost(response, "standard")
-        assert cost == pytest.approx(0.0005, rel=1e-6)
+        # 400 * $0.0003/1k + 100 * $0.001/1k = $0.00012 + $0.0001
+        assert cost == pytest.approx(0.00022, rel=1e-6)

@@ -25,6 +25,22 @@ class Settings(BaseSettings):
         "frontier": 0.008,
     }
 
+    # Paper Eq. 1: c_i = T_in * P_in + T_out * P_out
+    # Separate input/output pricing per tier (USD per 1K tokens)
+    tier_input_cost_per_1k: dict[str, float] = {
+        "cheap": 0.0001,
+        "standard": 0.0003,
+        "frontier": 0.002,
+    }
+    tier_output_cost_per_1k: dict[str, float] = {
+        "cheap": 0.0004,
+        "standard": 0.001,
+        "frontier": 0.006,
+    }
+
+    # Paper: T_in = 500 tokens (input baseline for cost estimation)
+    cost_estimation_input_tokens: int = 500
+
     budget_max_cost_usd: float = 1.00
     budget_max_tokens: int = 100_000
     llm_request_timeout: int = 30

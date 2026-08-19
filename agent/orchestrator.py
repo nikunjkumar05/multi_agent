@@ -120,7 +120,7 @@ async def run_task_with_degradation(
                 degradation_count,
             )
 
-        # CIRCUIT_BREAKER: budget exceeded 110% — try degradation first, then stop
+        # CIRCUIT_BREAKER: budget exceeded 100% — try degradation first, then stop
         if reason == "circuit_breaker":
             if current_topology != "single":
                 # Try emergency degradation to single
@@ -128,7 +128,7 @@ async def run_task_with_degradation(
                 log.warning("Circuit breaker: trying emergency degradation to single before stopping")
             else:
                 # Already at single — circuit breaker stops execution
-                log.error("Circuit breaker: budget exceeded 110%% on single topology — stopping")
+                log.error("Circuit breaker: budget exceeded 100%% on single topology — stopping")
                 return _build_result(
                     {
                         "status": "failed",
@@ -172,14 +172,14 @@ async def run_task_with_degradation(
         if budget_check is not None:
             return budget_check
 
-        # FAST PATH: If budget is >= 90% after projection, skip intermediate topologies
-        # and jump directly to single with skip_judge. This prevents rapid-fire
-        # degradation through fanout → supervisor → pipeline → single.
-        acc_cost_after = projected.get("consumed_cost", 0.0)
-        budget_obj = projected.get("budget")
-        if budget_obj and budget_obj.max_cost_usd > 0:
-            spent_pct_after = acc_cost_after / budget_obj.max_cost_usd
-            if spent_pct_after >= 0.90 and to_topology != "single":
+    # FAST PATH: If budget is >= 80% after projection, skip intermediate topologies
+    # and jump directly to single with skip_judge. This prevents rapid-fire
+    # degradation through fanout -> supervisor -> pipeline -> single.
+    acc_cost_after = projected.get("consumed_cost", 0.0)
+    budget_obj = projected.get("budget")
+    if budget_obj and budget_obj.max_cost_usd > 0:
+        spent_pct_after = acc_cost_after / budget_obj.max_cost_usd
+        if spent_pct_after >= 0.80 and to_topology != "single":
                 log.warning(
                     "Budget %.1f%% exhausted — jumping directly to single (skipping %s)",
                     spent_pct_after * 100, to_topology,

@@ -204,6 +204,46 @@ def project_pipeline_to_single(state: dict[str, Any]) -> dict[str, Any]:
     }, "pipeline→single")
 
 
+def project_feedback_to_single(state: dict[str, Any]) -> dict[str, Any]:
+    """feedback → single: carry forward latest output as prior_context."""
+    step_results = state.get("step_results", {})
+    steps = state.get("steps", [])
+
+    prior_context = None
+    if steps:
+        last_step_id = steps[-1]["step_id"]
+        last_output = step_results.get(last_step_id, "")
+        if last_output:
+            prior_context = f"Feedback iteration output:\n{last_output}"
+
+    return _assert_no_annotated_fields({
+        "topology": "single",
+        "prior_context": prior_context,
+        "feedback_iteration": 0,
+        "critic_accepted": False,
+        "critic_feedback": None,
+    }, "feedback→single")
+
+
+def project_any_to_feedback(state: dict[str, Any], from_topology: str) -> dict[str, Any]:
+    """any → feedback: carry forward completed work as prior_context."""
+    step_results = state.get("step_results", {})
+    completed = {k: v for k, v in step_results.items() if v is not None}
+
+    prior_context = None
+    if completed:
+        summaries = [f"Step {k}: {v}" for k, v in completed.items()]
+        prior_context = f"Prior work from {from_topology}:\n" + "\n".join(summaries)
+
+    return _assert_no_annotated_fields({
+        "topology": "feedback",
+        "prior_context": prior_context,
+        "feedback_iteration": 0,
+        "critic_accepted": False,
+        "critic_feedback": None,
+    }, f"{from_topology}→feedback")
+
+
 # ── Dispatch Table ────────────────────────────────────────────────────
 
 _PROJECTIONS: dict[tuple[str, str], Callable[[dict[str, Any]], dict[str, Any]]] = {
@@ -217,6 +257,12 @@ _PROJECTIONS: dict[tuple[str, str], Callable[[dict[str, Any]], dict[str, Any]]] 
     ("supervisor", "pipeline"): project_supervisor_to_pipeline,
     ("supervisor", "single"): project_supervisor_to_single,
     ("pipeline", "single"): project_pipeline_to_single,
+    ("feedback", "single"): project_feedback_to_single,
+    # Feedback can be reached from any topology
+    ("ensemble", "feedback"): lambda s: project_any_to_feedback(s, "ensemble"),
+    ("fanout", "feedback"): lambda s: project_any_to_feedback(s, "fanout"),
+    ("supervisor", "feedback"): lambda s: project_any_to_feedback(s, "supervisor"),
+    ("pipeline", "feedback"): lambda s: project_any_to_feedback(s, "pipeline"),
 }
 
 
@@ -306,12 +352,14 @@ _TOPOLOGY_REQUIRED_FIELDS: dict[str, list[str]] = {
     "supervisor": ["topology"],
     "fanout": ["topology"],
     "ensemble": ["topology"],
+    "feedback": ["topology"],
 }
 
 _TOPOLOGY_OPTIONAL_FIELDS: dict[str, list[str]] = {
     "supervisor": ["supervisor_remaining_tasks", "supervisor_completed_tasks"],
     "fanout": ["_worker_assignments", "fanout_worker_results"],
     "ensemble": ["agent_a_result", "agent_b_result", "agent_c_result"],
+    "feedback": ["feedback_iteration", "critic_accepted", "critic_feedback"],
 }
 
 

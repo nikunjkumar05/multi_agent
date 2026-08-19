@@ -8,7 +8,7 @@ from core.llm import create_llm
 
 Topology = str
 
-VALID_TOPOLOGIES = {"single", "supervisor", "pipeline", "fanout", "ensemble"}
+VALID_TOPOLOGIES = {"single", "supervisor", "pipeline", "fanout", "ensemble", "feedback"}
 
 
 class OptimizerDecision(BaseModel):
@@ -19,6 +19,9 @@ class OptimizerDecision(BaseModel):
     )
     rationale: str = Field(description="Why this topology and tier allocation was chosen")
     alternatives_considered: list[dict[str, str]] = Field(description="Other topologies considered and why rejected")
+    ilp_selected_tiers: dict[str, bool] | None = None  # ILP solver output
+    ilp_total_cost: float | None = None  # ILP estimated total cost
+    ilp_feasible: bool | None = None  # Whether ILP found a feasible solution
 
     @field_validator("alternatives_considered", mode="before")
     @classmethod
@@ -32,12 +35,13 @@ class OptimizerDecision(BaseModel):
 
 OPTIMIZER_PROMPT = """You are a cost-tier optimizer for a multi-agent system. Given a task and remaining budget,
 you must decide:
-1. Which collaboration topology to use (single, supervisor, pipeline, fanout, ensemble)
+1. Which collaboration topology to use (single, supervisor, pipeline, fanout, ensemble, feedback)
 2. Which model tier each agent role gets (cheap, standard, frontier)
 
 Topology selection rules:
 - single: trivial Q&A, one-liner answers, simple math (e.g. "what is 2+2?")
 - pipeline: code generation, content creation, writing, step-by-step building (e.g. "write a function", "generate code", "create a document")
+- feedback: tasks that benefit from iterative refinement (e.g. "improve this", "refine the solution", "polish the code")
 - supervisor: research tasks, explanations, comparisons, multi-source synthesis (e.g. "explain X", "compare Y and Z", "research topic")
 - fanout: data analysis, parallel subtasks, bulk processing (e.g. "analyze these datasets", "process multiple items")
 - ensemble: high-stakes decisions, critical validation, cross-verification (e.g. "verify this proof", "audit this code")
@@ -53,6 +57,7 @@ Budget constraints (spent %):
 - >90% spent: only cheap model, simplest topology
 
 IMPORTANT: For code generation and writing tasks, prefer "pipeline" topology.
+For tasks needing iterative improvement, prefer "feedback" topology.
 For research and explanation tasks, prefer "supervisor" topology.
 
 Task: {task}
@@ -70,6 +75,11 @@ def rule_based_select_topology(task: str) -> str:
     fanout_kw = ["analyze", "data", "parallel", "bulk", "multiple datasets", "compare all"]
     if any(kw in task_lower for kw in fanout_kw):
         return "fanout"
+
+    # Feedback topology: tasks that benefit from iterative refinement
+    feedback_kw = ["improve", "refine", "revise", "iterate", "optimize", "polish", "enhance"]
+    if any(kw in task_lower for kw in feedback_kw):
+        return "feedback"
 
     supervisor_kw = ["explain", "research", "compare", "why", "how does", "describe", "summarize", "review"]
     if any(kw in task_lower for kw in supervisor_kw):
@@ -118,7 +128,26 @@ class CostTierOptimizer:
             rule_topo = rule_based_select_topology(task)
             llm_decision = self._make_fallback_decision(task, rule_topo)
 
-        # 3. RL refinement: override when trained enough
+        # 3. ILP provisioning: optimize tier allocation within budget
+        # Paper Component 1: Budget-Constrained LLM Provisioning
+        from core.ilp_solver import solve_ilp, get_ilp_tier_allocation
+        remaining_budget = budget.max_cost_usd - budget.consumed_cost
+        ilp_result = solve_ilp(remaining_budget)
+        ilp_tiers = get_ilp_tier_allocation(remaining_budget)
+
+        # Use ILP tiers if feasible, otherwise fall back to LLM's tiers
+        if ilp_result.feasible:
+            model_tiers = ilp_tiers
+            rationale_suffix = (
+                f" (ILP: selected {[t for t, s in ilp_result.selected_tiers.items() if s]}, "
+                f"est. cost ${ilp_result.total_cost:.4f}, quality {ilp_result.total_quality:.1f})"
+            )
+        else:
+            default_tiers = {"planner": "standard", "executor": "standard", "validator": "cheap", "judge": "standard"}
+            model_tiers = {**default_tiers, **(llm_decision.model_tiers or {})}
+            rationale_suffix = " (ILP infeasible, using LLM tiers)"
+
+        # 4. RL refinement: override when trained enough
         redis = await get_redis()
         rl = RLPolicy(redis) if redis else None
         rl_topology = None
@@ -145,12 +174,7 @@ class CostTierOptimizer:
             )
         else:
             chosen = llm_topology
-            rationale = llm_decision.rationale
-
-        # 4. Use LLM's model tiers (with RL topology override)
-        # Ensure all required keys are present with defaults
-        default_tiers = {"planner": "standard", "executor": "standard", "validator": "cheap", "judge": "standard"}
-        model_tiers = {**default_tiers, **(llm_decision.model_tiers or {})}
+            rationale = llm_decision.rationale + rationale_suffix
 
         decision = OptimizerDecision(
             topology=chosen,
@@ -158,6 +182,9 @@ class CostTierOptimizer:
             model_tiers=model_tiers,
             rationale=rationale,
             alternatives_considered=llm_decision.alternatives_considered,
+            ilp_selected_tiers=ilp_result.selected_tiers if ilp_result.feasible else None,
+            ilp_total_cost=ilp_result.total_cost if ilp_result.feasible else None,
+            ilp_feasible=ilp_result.feasible,
         )
 
         if decision.topology not in VALID_TOPOLOGIES:

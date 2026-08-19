@@ -7,6 +7,7 @@ from agent.topologies.supervisor import build_supervisor_graph
 from agent.topologies.pipeline import build_pipeline_graph
 from agent.topologies.fanout import build_fanout_graph
 from agent.topologies.ensemble import build_ensemble_graph
+from agent.topologies.feedback import build_feedback_graph
 
 _TOPOLOGY_BUILDERS = {
     "single": build_single_graph,
@@ -14,6 +15,7 @@ _TOPOLOGY_BUILDERS = {
     "pipeline": build_pipeline_graph,
     "fanout": build_fanout_graph,
     "ensemble": build_ensemble_graph,
+    "feedback": build_feedback_graph,
 }
 
 checkpointer: BaseCheckpointSaver | None = None

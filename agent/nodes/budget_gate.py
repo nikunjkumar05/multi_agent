@@ -19,7 +19,7 @@ from core.audit import get_audit_trail
 from core.budget import BudgetBand, BudgetTracker, next_topology
 from core.node_events import emit_event
 
-HARD_CAP_MULTIPLIER = 1.05  # Circuit breaker triggers at 105% of budget
+HARD_CAP_MULTIPLIER = 1.00  # Circuit breaker triggers at 100% of budget
 
 
 class BudgetGateAction(str, Enum):
@@ -66,7 +66,7 @@ async def budget_gate_node(state: dict) -> dict:
     Fires at synchronization barriers after LLM-invoking nodes.
     Syncs BudgetTracker with live consumed_cost/consumed_tokens so that
     band detection works correctly across all consumers.
-    Includes hard circuit breaker at 105% of budget.
+    Includes hard circuit breaker at 100% of budget.
     """
     from langgraph.types import interrupt
 
@@ -78,7 +78,7 @@ async def budget_gate_node(state: dict) -> dict:
         budget.consumed_cost = acc_cost
         budget.consumed_tokens = acc_tokens
 
-    # Hard circuit breaker: force stop if cost exceeds 110% of budget
+    # Hard circuit breaker: force stop if cost exceeds 100% of budget
     if budget and budget.max_cost_usd > 0 and acc_cost >= budget.max_cost_usd * HARD_CAP_MULTIPLIER:
         task_id = state.get("task_id", "")
         spent_pct = round(acc_cost / budget.max_cost_usd * 100, 1)

@@ -29,15 +29,23 @@ def _budget_adjusted_step_count(desired: int, budget, tier: str) -> int:
     if budget is None or budget.max_cost_usd <= 0:
         return desired
 
-    from core.config import settings
-    cost_per_1k = settings.tier_cost_per_1k_tokens.get(tier, 0.001)
+    from core.llm import estimate_cost_from_tokens
 
-    # Estimate cost per step: executor (~700 tok) + validator (~300 tok) = ~1000 tokens
-    # Plus amortized judge (~200 tok) and planner overhead
-    tokens_per_step = 1000  # executor + validator
-    fixed_overhead_tokens = 1500  # planner + judge
-    cost_per_step = (tokens_per_step / 1000.0) * cost_per_1k
-    fixed_cost = (fixed_overhead_tokens / 1000.0) * cost_per_1k
+    # Paper Eq. 1: c_i = T_in * P_in + T_out * P_out
+    # Estimate cost per step: executor (~700 tok) + validator (~300 tok)
+    executor_input = 560  # ~80% of 700
+    executor_output = 140  # ~20% of 700
+    validator_input = 240  # ~80% of 300
+    validator_output = 60  # ~20% of 300
+    cost_per_step = (
+        estimate_cost_from_tokens(executor_input, executor_output, tier)
+        + estimate_cost_from_tokens(validator_input, validator_output, tier)
+    )
+    # Fixed overhead: planner (~500 tok input, ~200 tok output) + judge (~200 tok input, ~500 tok output)
+    fixed_cost = (
+        estimate_cost_from_tokens(500, 200, tier)
+        + estimate_cost_from_tokens(200, 500, tier)
+    )
 
     remaining = budget.max_cost_usd - budget.consumed_cost
     if remaining <= fixed_cost:

@@ -84,7 +84,7 @@ async def ensemble_judge(state: AgentState) -> dict:
     acc_cost = state.get("consumed_cost", 0.0)
     if budget and budget.max_cost_usd > 0:
         spent_pct = (acc_cost / budget.max_cost_usd) * 100
-        if spent_pct >= 90:
+        if spent_pct >= 80:
             await emit_event(task_id, "judge_skipped", {
                 "reason": "budget_critical",
                 "spent_pct": round(spent_pct, 1),
@@ -102,19 +102,13 @@ async def ensemble_judge(state: AgentState) -> dict:
     tier = state["decision"].model_tiers.get("judge", "frontier")
 
     # Dynamic budget guard: estimate judge call cost before invoking LLM.
-    # This prevents budget overruns when the judge uses expensive models (e.g. frontier)
-    # and the remaining budget is small. Without this, a single judge call can consume
-    # 5-10x the remaining budget.
-    from core.config import settings
-    cost_per_1k = settings.tier_cost_per_1k_tokens.get(tier, 0.001)
-    # Estimate input tokens: characters / 4 (rough approximation)
+    # Paper Eq. 1: c_i = T_in * P_in + T_out * P_out
+    from core.llm import estimate_cost_from_tokens
     input_chars = len(state.get("task", "")) + len(executor_outputs_str)
     est_input_tokens = max(1, input_chars // 4)
-    # Estimate output tokens: frontier models tend to produce longer outputs
     est_output_multiplier = {"cheap": 0.3, "standard": 0.5, "frontier": 0.8}.get(tier, 0.5)
     est_output_tokens = max(100, int(est_input_tokens * est_output_multiplier))
-    est_total_tokens = est_input_tokens + est_output_tokens
-    est_cost = (est_total_tokens / 1000.0) * cost_per_1k
+    est_cost = estimate_cost_from_tokens(est_input_tokens, est_output_tokens, tier)
     remaining_budget = budget.max_cost_usd - acc_cost
 
     if est_cost > remaining_budget and remaining_budget > 0:

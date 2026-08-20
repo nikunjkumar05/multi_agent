@@ -4,7 +4,7 @@ COPY pyproject.toml README.md ./
 COPY core/ core/
 COPY agent/ agent/
 COPY api/ api/
-COPY cli/ cli/
+COPY middleware/ middleware/
 RUN pip install --no-cache-dir .
 FROM python:3.12-slim
 RUN useradd --create-home appuser

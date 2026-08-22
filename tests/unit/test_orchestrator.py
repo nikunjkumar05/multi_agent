@@ -231,8 +231,11 @@ class TestNextTopology:
     def test_ensemble_to_fanout(self):
         assert _next_topology("ensemble") == "fanout"
 
-    def test_fanout_to_supervisor(self):
-        assert _next_topology("fanout") == "supervisor"
+    def test_fanout_to_feedback(self):
+        assert _next_topology("fanout") == "feedback"
+
+    def test_feedback_to_supervisor(self):
+        assert _next_topology("feedback") == "supervisor"
 
     def test_supervisor_to_pipeline(self):
         assert _next_topology("supervisor") == "pipeline"

@@ -191,6 +191,12 @@ class TestDispatchTable:
             ("supervisor", "pipeline"),
             ("supervisor", "single"),
             ("pipeline", "single"),
+            # Feedback topology (paper alignment)
+            ("feedback", "single"),
+            ("ensemble", "feedback"),
+            ("fanout", "feedback"),
+            ("supervisor", "feedback"),
+            ("pipeline", "feedback"),
         ]
         assert sorted(edges) == sorted(expected)
 

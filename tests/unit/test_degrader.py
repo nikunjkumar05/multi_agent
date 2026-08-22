@@ -25,9 +25,14 @@ class TestDegradeTopology:
         result = degrade_topology(bt, "ensemble", "task-3")
         assert result == "fanout"
 
-    def test_structural_degrade_fanout_to_supervisor(self):
+    def test_structural_degrade_fanout_to_feedback(self):
         bt = BudgetTracker(max_cost_usd=1.0, consumed_cost=0.95)
         result = degrade_topology(bt, "fanout", "task-4")
+        assert result == "feedback"
+
+    def test_structural_degrade_feedback_to_supervisor(self):
+        bt = BudgetTracker(max_cost_usd=1.0, consumed_cost=0.95)
+        result = degrade_topology(bt, "feedback", "task-4b")
         assert result == "supervisor"
 
     def test_structural_degrade_supervisor_to_pipeline(self):
@@ -56,7 +61,7 @@ class TestDegradeTopology:
         assert result == "single"
 
     def test_degradation_chain_order(self):
-        assert TOPOLOGY_DEGRADATION_CHAIN == ["ensemble", "fanout", "supervisor", "pipeline", "single"]
+        assert TOPOLOGY_DEGRADATION_CHAIN == ["ensemble", "fanout", "feedback", "supervisor", "pipeline", "single"]
 
     @patch("core.degrader.get_audit_trail")
     def test_audit_records_on_structural_degrade(self, mock_get_audit):

@@ -232,45 +232,45 @@ async def run_task_with_degradation(
                     # Continue the loop — next ainvoke will run single topology
                     continue
 
-            # Sync BudgetTracker with projected state
-            _sync_budget_tracker(projected)
+        # Sync BudgetTracker with projected state
+        _sync_budget_tracker(projected)
 
-            # Record topology history for this degradation
-            # topology_history is annotated with operator.add — append a record
-            projected["topology_history"] = [{"from": from_topology, "to": to_topology, "reason": reason}]
+        # Record topology history for this degradation
+        # topology_history is annotated with operator.add — append a record
+        projected["topology_history"] = [{"from": from_topology, "to": to_topology, "reason": reason}]
 
-            # Emit degradation event
-            await emit_event(
-                task_id,
-                "topology_degraded",
-                {
-                    "from_topology": from_topology,
-                    "to_topology": to_topology,
-                    "band": interrupt_value.get("band", "unknown"),
-                    "reason": reason,
-                    "degradation_number": degradation_count + 1,
-                    "consumed_cost": projected.get("consumed_cost", 0.0),
-                    "budget_remaining": _get_budget_remaining(projected),
-                },
-            )
+        # Emit degradation event
+        await emit_event(
+            task_id,
+            "topology_degraded",
+            {
+                "from_topology": from_topology,
+                "to_topology": to_topology,
+                "band": interrupt_value.get("band", "unknown"),
+                "reason": reason,
+                "degradation_number": degradation_count + 1,
+                "consumed_cost": projected.get("consumed_cost", 0.0),
+                "budget_remaining": _get_budget_remaining(projected),
+            },
+        )
 
-            # Audit the degradation
-            audit = get_audit_trail()
-            audit.record_degradation(
-                task_id=task_id,
-                from_topology=from_topology,
-                to_topology=to_topology,
-                reason=f"Mid-execution: {reason} on {from_topology}",
-            )
+        # Audit the degradation
+        audit = get_audit_trail()
+        audit.record_degradation(
+            task_id=task_id,
+            from_topology=from_topology,
+            to_topology=to_topology,
+            reason=f"Mid-execution: {reason} on {from_topology}",
+        )
 
-            # Build new graph for degraded topology
-            from agent.topologies.builder import compile_graph
+        # Build new graph for degraded topology
+        from agent.topologies.builder import compile_graph
 
-            current_topology = to_topology
-            current_graph = compile_graph(current_topology)
-            current_graph.update_state(config, projected, as_node=START)
+        current_topology = to_topology
+        current_graph = compile_graph(current_topology)
+        current_graph.update_state(config, projected, as_node=START)
 
-            degradation_count += 1
+        degradation_count += 1
 
     # Safety limit reached — return failure
     return _build_result(
@@ -437,6 +437,7 @@ def _estimate_quality_degradation(
     topology_quality_factor = {
         "ensemble": 1.0,
         "fanout": 0.8,
+        "feedback": 0.75,
         "supervisor": 0.7,
         "pipeline": 0.6,
         "single": 0.5,

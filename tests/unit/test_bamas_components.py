@@ -108,7 +108,7 @@ class TestProjections:
         assert ("ensemble", "fanout") in edges
         assert ("fanout", "single") in edges
         assert ("pipeline", "single") in edges
-        assert len(edges) == 10
+        assert len(edges) == 15
 
 
 class TestSelectBestCandidate:

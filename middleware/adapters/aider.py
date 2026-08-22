@@ -252,7 +252,7 @@ class AiderAdapter(AgentAdapter):
             # Everything else is potential output
             output_lines.append(line)
 
-    # Join output, trimming leading/trailing empty lines
+        # Join output, trimming leading/trailing empty lines
         output = "\n".join(output_lines).strip()
 
         # If no tokens found, estimate from output length

@@ -255,6 +255,16 @@ async def execute_task_background(task_id: str, candidate_ids: list[str], task_d
     persistence.save_task(task_info)
 
 
+@router.get("")
+async def list_tasks(limit: int = 50):
+    """Most-recent-first task feed (for the dashboard)."""
+    records = list(tasks_db.values())
+    return [
+        {k: v for k, v in r.items() if k in TaskResponse.model_fields}
+        for r in reversed(records[-limit:])
+    ]
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: str):
     """Get the current status, results, and budget receipt of a task."""

@@ -1,14 +1,23 @@
 """
 End-to-end integration tests for all 5 BAMAS topologies.
 
-Each test runs a REAL task through the full graph with Mistral LLM calls.
+Each test runs a REAL task through the full graph with real LLM calls.
 No mocks. Proves the system actually works.
+
+Skipped automatically when OPENAI_API_KEY is not set (e.g. in CI).
 
 Run with: pytest tests/integration/test_topologies.py -v --timeout=120
 """
+import os
+
 import pytest
 
 from core.budget import BudgetTracker
+
+requires_api_key = pytest.mark.skipif(
+    not os.getenv("OPENAI_API_KEY"),
+    reason="requires OPENAI_API_KEY for live LLM calls",
+)
 
 
 def _budget(usd: float = 0.50) -> BudgetTracker:
@@ -16,6 +25,7 @@ def _budget(usd: float = 0.50) -> BudgetTracker:
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_single_topology():
     """Single topology: planner -> executor -> validator -> finalizer."""
     from agent.graph import run_task
@@ -35,6 +45,7 @@ async def test_single_topology():
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_pipeline_topology():
     """Pipeline topology: planner -> executor -> validator -> judge -> finalizer (sequential steps)."""
     from agent.graph import run_task
@@ -53,6 +64,7 @@ async def test_pipeline_topology():
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_supervisor_topology():
     """Supervisor topology: planner -> supervisor dispatch -> executor -> validator -> judge -> finalizer."""
     from agent.graph import run_task
@@ -71,6 +83,7 @@ async def test_supervisor_topology():
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_fanout_topology():
     """Fanout topology: planner -> dispatcher -> parallel workers -> aggregator -> judge -> finalizer."""
     from agent.graph import run_task
@@ -89,6 +102,7 @@ async def test_fanout_topology():
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_ensemble_topology():
     """Ensemble topology: planner -> 3 parallel agents -> judge -> finalizer."""
     from agent.graph import run_task
@@ -122,6 +136,7 @@ async def test_topology_override_single():
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_budget_tracking_across_topologies():
     """Verify budget tracking works for multiple topologies."""
     from agent.graph import run_task

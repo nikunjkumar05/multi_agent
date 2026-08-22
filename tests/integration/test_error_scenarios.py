@@ -9,17 +9,24 @@ Tests that the system handles:
 5. Budget exhaustion mid-execution → interrupt/degrade
 """
 import asyncio
+import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from core.budget import BudgetTracker
 
+requires_api_key = pytest.mark.skipif(
+    not os.getenv("OPENAI_API_KEY"),
+    reason="requires OPENAI_API_KEY for live LLM calls",
+)
+
 
 class TestPlannerFailure:
     """Planner LLM failures should fall back to single-step plan."""
 
     @pytest.mark.anyio
+    @requires_api_key
     async def test_planner_llm_failure_single_step_fallback(self):
         """If planner LLM raises, task should still complete with 1 step."""
         from agent.graph import run_task
@@ -44,6 +51,7 @@ class TestJudgeFailure:
     """Judge LLM failures should fall back to executor output."""
 
     @pytest.mark.anyio
+    @requires_api_key
     async def test_judge_timeout_uses_executor_output(self):
         """If judge times out, the executor's output should be used as final result."""
         from agent.graph import run_task
@@ -70,6 +78,7 @@ class TestEnsembleAgentFailure:
     """Ensemble agent failures should be handled gracefully."""
 
     @pytest.mark.anyio
+    @requires_api_key
     async def test_ensemble_completes_even_with_low_budget(self):
         """Ensemble should complete even with tight budget (agents may fail)."""
         from agent.graph import run_task
@@ -90,6 +99,7 @@ class TestBudgetExhaustion:
     """Budget exhaustion should trigger degradation or skip judge."""
 
     @pytest.mark.anyio
+    @requires_api_key
     async def test_tiny_budget_completes(self):
         """Even with a tiny budget, the system should complete (not hang)."""
         from agent.graph import run_task

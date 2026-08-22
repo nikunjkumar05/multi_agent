@@ -1,9 +1,15 @@
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api.main import app
+
+requires_api_key = pytest.mark.skipif(
+    not os.getenv("OPENAI_API_KEY"),
+    reason="requires OPENAI_API_KEY for live LLM calls",
+)
 
 
 @pytest.mark.anyio
@@ -16,6 +22,7 @@ async def test_health():
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_execute_returns_task_id():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -43,6 +50,7 @@ async def test_get_audit_not_found():
 
 
 @pytest.mark.anyio
+@requires_api_key
 async def test_execute_with_topology_override():
     with patch("core.redis_client.get_redis", new_callable=lambda: AsyncMock(return_value=None)):
         transport = ASGITransport(app=app)

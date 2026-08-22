@@ -1,5 +1,4 @@
-import pytest
-from core.optimizer import rule_based_select_topology, OptimizerDecision, VALID_TOPOLOGIES
+from core.optimizer import VALID_TOPOLOGIES, OptimizerDecision, rule_based_select_topology
 
 
 class TestRuleBasedSelectTopology:
@@ -65,4 +64,4 @@ class TestOptimizerDecision:
         assert len(d.alternatives_considered) == 1
 
     def test_valid_topologies_set(self):
-        assert VALID_TOPOLOGIES == {"single", "supervisor", "pipeline", "fanout", "ensemble"}
+        assert VALID_TOPOLOGIES == {"single", "supervisor", "pipeline", "fanout", "ensemble", "feedback"}

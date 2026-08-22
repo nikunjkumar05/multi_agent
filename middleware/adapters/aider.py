@@ -114,7 +114,7 @@ class AiderAdapter(AgentAdapter):
                 },
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             latency_ms = int((time.monotonic() - start) * 1000)
             if proc and proc.returncode is None:
                 proc.kill()

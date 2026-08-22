@@ -2,9 +2,8 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.nodes.executor import _extract_text
+from agent.nodes.executor import _extract_text, detect_task_type
 from agent.state import AgentState
-from agent.nodes.executor import detect_task_type
 from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
 

@@ -14,7 +14,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
@@ -121,8 +120,9 @@ class SQLiteDB(AsyncDB):
 
     async def _get_conn(self) -> Any:
         if self._conn is None:
-            import aiosqlite
             from pathlib import Path
+
+            import aiosqlite
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
             self._conn = await aiosqlite.connect(self._db_path)
         return self._conn

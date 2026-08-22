@@ -25,8 +25,8 @@ def _build_registry() -> AgentRegistry:
         registry.register("mock", MockAdapter("mock"))
         return registry
 
-    from middleware.adapters.opencode import OpenCodeAdapter
     from middleware.adapters.aider import AiderAdapter
+    from middleware.adapters.opencode import OpenCodeAdapter
 
     registry.register("opencode", OpenCodeAdapter())
     registry.register("aider", AiderAdapter())

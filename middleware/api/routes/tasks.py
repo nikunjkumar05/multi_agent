@@ -1,17 +1,16 @@
+import logging
 import time
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from middleware import persistence
+from middleware.adapters.base import AgentTask
 from middleware.api.state import budget_manager, registry, tasks_db
 from middleware.budget.budget_manager import BudgetAction
 from middleware.classifier.task_classifier import classify_task
 from middleware.models.schemas import TaskCreate, TaskResponse, TaskStatus
-from middleware.adapters.base import AgentTask
 from middleware.selection import filter_capable, select_agents
-
-import logging
 
 log = logging.getLogger(__name__)
 

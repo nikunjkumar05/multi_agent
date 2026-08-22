@@ -1,6 +1,6 @@
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent.state import AgentState
 from agent.tools.registry import registry
@@ -340,7 +340,7 @@ async def _react_loop(llm: Any, messages: list, tier: str, state: AgentState) ->
                 llm.ainvoke(messages + tool_messages),
                 timeout=_LLM_TIMEOUT,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return f"[LLM call timed out after {_LLM_TIMEOUT}s]", loop_tokens, loop_cost
 
         loop_tokens += estimate_tokens(response)

@@ -8,11 +8,9 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from agent.tools.code_executor import CodeExecutor
-from agent.tools.db_query import DBQueryTool, BLOCKED_KEYWORDS
-from agent.tools.file_ops import FileReadTool, FileWriteTool, FileListTool, _safe_path
+from agent.tools.db_query import DBQueryTool
+from agent.tools.file_ops import FileListTool, FileReadTool, FileWriteTool, _safe_path
 
 
 class TestCodeExecutor:

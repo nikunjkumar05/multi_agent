@@ -1,20 +1,20 @@
 """Unit tests for the OpenAI proxy layer."""
 
 import pytest
+
 from api.models.openai_schemas import (
+    ChatCompletionChunk,
     ChatCompletionRequest,
     ChatCompletionResponse,
-    ChatCompletionChunk,
     ChatMessage,
     ModelListResponse,
 )
 from api.routes.proxy import (
-    _extract_prompt,
-    _map_model_to_tier,
-    _format_chunk,
     _DEFAULT_BUDGET_USD,
+    _extract_prompt,
+    _format_chunk,
+    _map_model_to_tier,
 )
-
 
 # ── Model → Tier Mapping ──────────────────────────────────────────────
 

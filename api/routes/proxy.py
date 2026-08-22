@@ -16,12 +16,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 import uuid
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import StreamingResponse
 
 from api.middleware.auth import require_auth
 from api.models.openai_schemas import (
@@ -37,6 +36,7 @@ from api.models.openai_schemas import (
     StreamChoice,
     Usage,
 )
+from core.budget import BudgetTracker
 
 log = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ async def chat_completions(
     Returns OpenAI-format response (streaming or non-streaming).
     """
     from agent.graph import run_task
-    from api.routes.execute import _tasks, _run_background, _evict_if_needed
+    from api.routes.execute import _evict_if_needed
     from core.budget import BudgetTracker
 
     # Determine budget
@@ -186,7 +186,7 @@ async def chat_completions(
         content = f"[Task completed with status: {result.get('status', 'unknown')}]"
 
     # Build usage from budget tracker
-    spent_pct = result.get("budget_spent_pct", 0.0)
+    result.get("budget_spent_pct", 0.0)
     est_tokens = max(1, int(len(content) // 4))  # rough estimate
     usage = Usage(
         prompt_tokens=max(1, len(prompt) // 4),
@@ -212,14 +212,13 @@ async def chat_completions(
 async def _stream_chat(
     task_id: str,
     prompt: str,
-    budget: "BudgetTracker",
+    budget: BudgetTracker,
     req: ChatCompletionRequest,
 ) -> AsyncGenerator[str, None]:
     """Run task through BAMAS and stream results as OpenAI SSE chunks."""
-    import asyncio
+    from agent.graph import run_task
     from core.events import EventBroadcaster
     from core.redis_client import get_redis
-    from agent.graph import run_task
 
     chunk_id = f"chatcmpl-bamas-{uuid.uuid4().hex[:12]}"
 
@@ -232,12 +231,11 @@ async def _stream_chat(
     # Try to stream events from Redis PubSub
     redis = await get_redis()
     if redis is not None:
-        broadcaster = EventBroadcaster(redis)
+        EventBroadcaster(redis)
         pubsub = redis.pubsub()
         await pubsub.subscribe(f"events:{task_id}")
 
         accumulated = ""
-        last_event = None
 
         try:
             while not task.done():
@@ -266,8 +264,7 @@ async def _stream_chat(
                                     yield _format_chunk(chunk_id, req.model, delta_content=delta)
                                     accumulated = agent_content
 
-                        last_event = event
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
             # Task finished — get result

@@ -1,6 +1,8 @@
-import pytest
 import json
 from unittest.mock import AsyncMock
+
+import pytest
+
 from core.events import EventBroadcaster
 
 

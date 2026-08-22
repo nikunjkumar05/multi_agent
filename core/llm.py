@@ -2,9 +2,9 @@ from abc import ABC, abstractmethod
 from typing import Any, Literal
 
 from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI
 from langchain_mistralai import ChatMistralAI
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 
 from core.config import settings
 

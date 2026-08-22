@@ -11,11 +11,10 @@ across agent/graph.py, centralising all post-task learning in one place.
 
 from __future__ import annotations
 
-from core.rl_policy import RLPolicy
-from core.stats import TaskOutcome, stats
-
 # Import the canonical detect_task_type from executor (single source of truth)
 from agent.nodes.executor import detect_task_type
+from core.rl_policy import RLPolicy
+from core.stats import TaskOutcome, stats
 
 # Topology-task type compatibility: which topology is "correct" for each task type
 TOPOLOGY_TASK_MAP = {

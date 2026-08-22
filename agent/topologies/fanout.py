@@ -77,7 +77,7 @@ def _make_worker_node(worker_name: str):
                 step_tokens = estimate_tokens(response)
                 step_cost = estimate_cost(response, tier)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.warning("Worker %s timed out on step %s", worker_name, step["step_id"])
                 output = f"[Worker {worker_name} timed out on step {step['step_id']}]"
                 response = None

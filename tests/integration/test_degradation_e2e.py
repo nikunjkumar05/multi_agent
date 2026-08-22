@@ -8,12 +8,11 @@ Uses mocked LLM to control cost without needing a real API.
 """
 
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.budget import BudgetTracker, BudgetBand
+from core.budget import BudgetBand, BudgetTracker
 from core.optimizer import OptimizerDecision
 
 
@@ -200,8 +199,8 @@ async def test_degradation_chain_ensemble_to_single():
             topology_override="ensemble",
         )
 
-    final_topo = result.get("topology", "ensemble")
-    degradation_count = result.get("degradation_count", 0)
+    result.get("topology", "ensemble")
+    result.get("degradation_count", 0)
 
     # The system didn't crash
     assert result["status"] in ("completed", "degraded_completion", "failed")
@@ -213,10 +212,10 @@ async def test_budget_gate_interrupts_and_projects():
     Verify the budget gate fires an interrupt, and the orchestrator
     catches it and projects to a degraded topology.
     """
+    from langgraph.checkpoint.memory import MemorySaver
+
     from agent.orchestrator import run_task_with_degradation
     from agent.topologies.builder import compile_graph
-    from langgraph.checkpoint.memory import MemorySaver
-    from core.audit import get_audit_trail
 
     budget = BudgetTracker(max_cost_usd=0.001)
     budget.consumed_cost = 0.00095  # 95% spent → STRUCTURAL_DEGRADE

@@ -9,8 +9,9 @@ Tests that the system handles:
 5. Budget exhaustion mid-execution → interrupt/degrade
 """
 import asyncio
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.budget import BudgetTracker
 
@@ -47,7 +48,6 @@ class TestJudgeFailure:
         """If judge times out, the executor's output should be used as final result."""
         from agent.graph import run_task
 
-        original_judge = None
 
         async def slow_judge(state):
             await asyncio.sleep(300)  # Simulate timeout

@@ -29,7 +29,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import START
 
 from core.audit import get_audit_trail
-from core.budget import BudgetTracker, next_topology
+from core.budget import next_topology
 from core.node_events import emit_event
 from core.projections import project_state, validate_projected_state
 
@@ -76,7 +76,7 @@ async def run_task_with_degradation(
                 current_graph.ainvoke(None, config),
                 timeout=_GRAPH_TIMEOUT,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.error("Graph timed out after %ds on topology %s", _GRAPH_TIMEOUT, current_topology)
             return _build_result(
                 {"status": "failed", "final_output": None, "logs": [f"Graph timed out on {current_topology}"]},
@@ -186,7 +186,8 @@ async def run_task_with_degradation(
                     )
                     # Project directly to single
                     try:
-                        from core.projections import project_state as _ps, validate_projected_state as _vp
+                        from core.projections import project_state as _ps
+                        from core.projections import validate_projected_state as _vp
                         single_projected = _ps(projected, current_topology, "single")
                         is_valid, err = _vp(single_projected, "single")
                         if is_valid:

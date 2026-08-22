@@ -6,11 +6,11 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from middleware.api.main import app
 from middleware.adapters.base import AgentAdapter, AgentResult, AgentTask
-from middleware.api.state import budget_manager, registry, tasks_db
-from middleware.selection import select_agents
+from middleware.api.main import app
+from middleware.api.state import budget_manager, registry
 from middleware.models.schemas import TaskStatus
+from middleware.selection import select_agents
 
 client = TestClient(app)
 

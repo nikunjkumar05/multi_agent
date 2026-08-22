@@ -2,23 +2,20 @@
 
 import pytest
 
-from core.budget import BudgetBand, BudgetTracker
+from agent.nodes.budget_gate import BudgetGateAction, evaluate_gate
+from agent.nodes.entry_router import entry_router_node, route_next_step
+from core.budget import BudgetTracker
 from core.projections import (
+    _select_best_candidate,
+    get_valid_projection_edges,
     project_ensemble_to_fanout,
     project_ensemble_to_single,
-    project_ensemble_to_supervisor,
     project_fanout_to_single,
     project_fanout_to_supervisor,
     project_pipeline_to_single,
     project_state,
-    project_supervisor_to_pipeline,
     project_supervisor_to_single,
-    _select_best_candidate,
-    get_valid_projection_edges,
 )
-from agent.nodes.budget_gate import BudgetGateAction, evaluate_gate
-from agent.nodes.entry_router import entry_router_node, route_next_step
-
 
 # ── Projection Tests ──────────────────────────────────────────────────
 

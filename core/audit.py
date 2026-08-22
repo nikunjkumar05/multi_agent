@@ -13,7 +13,7 @@ import asyncio
 import collections
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ class AuditTrail:
         entry = {
             "task_id": task_id,
             "event_type": event_type,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "detail": detail,
         }
         self._entries.append(entry)

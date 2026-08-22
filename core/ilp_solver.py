@@ -19,7 +19,7 @@ import logging
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.optimize import milp, LinearConstraint, Bounds
+from scipy.optimize import Bounds, LinearConstraint, milp
 
 from core.config import settings
 from core.llm import ModelTier

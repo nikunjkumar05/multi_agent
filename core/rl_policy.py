@@ -280,7 +280,7 @@ class RLPolicy:
 
     def _load_from_file(self) -> None:
         try:
-            with open(self.persist_path, "r") as f:
+            with open(self.persist_path) as f:
                 data = json.load(f)
             self.arms = data.get("arms", {})
             self.total_tasks = data.get("total_tasks", 0)

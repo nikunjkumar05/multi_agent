@@ -1,6 +1,5 @@
 """Unit tests for agent/nodes/budget_gate.py — evaluate_gate() pure function."""
 
-import pytest
 
 from agent.nodes.budget_gate import BudgetGateAction, evaluate_gate
 from core.budget import BudgetTracker

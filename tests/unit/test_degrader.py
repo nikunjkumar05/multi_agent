@@ -1,8 +1,8 @@
-import pytest
 from unittest.mock import patch
-from core.degrader import degrade_topology
-from core.budget import BudgetTracker, BudgetBand, TOPOLOGY_DEGRADATION_CHAIN
+
 from core.audit import AuditTrail
+from core.budget import TOPOLOGY_DEGRADATION_CHAIN, BudgetTracker
+from core.degrader import degrade_topology
 
 
 def _fresh_audit() -> AuditTrail:

@@ -6,9 +6,7 @@ No mocks. Proves the system actually works.
 
 Run with: pytest tests/integration/test_topologies.py -v --timeout=120
 """
-import asyncio
 import pytest
-import os
 
 from core.budget import BudgetTracker
 

@@ -49,7 +49,19 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
-ignore = ["E501"]
+ignore = [
+    "E501",
+    # Keep `class X(str, Enum)` pattern: StrEnum migration risks log/repr churn
+    # across FastAPI serialization and audit formatting. Revisit deliberately.
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Logging is configured before router/tool imports so early import-time logs
+# inherit the root configuration — deliberate module-level ordering.
+"api/main.py" = ["E402"]
+"agent/tools/registry.py" = ["E402"]
+"agent/nodes/validator.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.12"

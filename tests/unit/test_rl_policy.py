@@ -1,9 +1,9 @@
 import os
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from core.rl_policy import RLPolicy, TOPOLOGIES
+import pytest
+
+from core.rl_policy import TOPOLOGIES, RLPolicy
 
 
 class TestRLPolicyFeatures:
@@ -232,7 +232,7 @@ class TestFilePersistence:
         policy._save_to_file()
 
         import json
-        with open(persist, "r") as f:
+        with open(persist) as f:
             data = json.load(f)
         assert data["total_tasks"] == 15
         assert data["arms"]["single"]["alpha"] == 3.0
@@ -278,7 +278,7 @@ class TestFilePersistence:
 
         assert os.path.exists(persist)
         import json
-        with open(persist, "r") as f:
+        with open(persist) as f:
             data = json.load(f)
         assert data["arms"]["pipeline"]["alpha"] == 2.0
         assert data["total_tasks"] == 1
@@ -390,7 +390,7 @@ class TestReset:
         await policy.reset()
 
         import json
-        with open(policy.persist_path, "r") as f:
+        with open(policy.persist_path) as f:
             data = json.load(f)
         assert data["total_tasks"] == 0
         for topo in TOPOLOGIES:

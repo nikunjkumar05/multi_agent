@@ -1,13 +1,12 @@
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import StateGraph
 
-from agent.state import AgentState
+from agent.topologies.ensemble import build_ensemble_graph
+from agent.topologies.fanout import build_fanout_graph
+from agent.topologies.feedback import build_feedback_graph
+from agent.topologies.pipeline import build_pipeline_graph
 from agent.topologies.single import build_single_graph
 from agent.topologies.supervisor import build_supervisor_graph
-from agent.topologies.pipeline import build_pipeline_graph
-from agent.topologies.fanout import build_fanout_graph
-from agent.topologies.ensemble import build_ensemble_graph
-from agent.topologies.feedback import build_feedback_graph
 
 _TOPOLOGY_BUILDERS = {
     "single": build_single_graph,
@@ -21,8 +20,17 @@ _TOPOLOGY_BUILDERS = {
 checkpointer: BaseCheckpointSaver | None = None
 
 
-def get_checkpointer() -> BaseCheckpointSaver | None:
-    """Return the current checkpointer (must be set via init_checkpointer during lifespan)."""
+def get_checkpointer() -> BaseCheckpointSaver:
+    """Return the current checkpointer, lazily creating a MemorySaver if needed.
+
+    Lifespan calls init_checkpointer() explicitly; lazy fallback keeps graphs
+    functional in tests/scripts that never ran the FastAPI lifespan.
+    """
+    global checkpointer
+    if checkpointer is None:
+        from langgraph.checkpoint.memory import MemorySaver
+
+        checkpointer = MemorySaver()
     return checkpointer
 
 

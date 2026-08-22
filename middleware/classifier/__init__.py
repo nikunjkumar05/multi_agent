@@ -1,6 +1,6 @@
 from middleware.classifier.task_classifier import (
-    TaskType,
     ClassificationResult,
+    TaskType,
     classify_task,
     classify_task_with_llm,
     get_task_type_label,

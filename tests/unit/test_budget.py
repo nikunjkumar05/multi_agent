@@ -1,5 +1,6 @@
 import pytest
-from core.budget import BudgetTracker, BudgetBand
+
+from core.budget import BudgetBand, BudgetTracker
 
 
 class TestBudgetBands:
@@ -107,9 +108,13 @@ class TestGetDegradedTopology:
         bt = BudgetTracker(max_cost_usd=1.0, consumed_cost=0.0)
         assert bt.get_degraded_topology("ensemble") == "fanout"
 
-    def test_fanout_to_supervisor(self):
+    def test_fanout_to_feedback(self):
         bt = BudgetTracker(max_cost_usd=1.0, consumed_cost=0.0)
-        assert bt.get_degraded_topology("fanout") == "supervisor"
+        assert bt.get_degraded_topology("fanout") == "feedback"
+
+    def test_feedback_to_supervisor(self):
+        bt = BudgetTracker(max_cost_usd=1.0, consumed_cost=0.0)
+        assert bt.get_degraded_topology("feedback") == "supervisor"
 
     def test_supervisor_to_pipeline(self):
         bt = BudgetTracker(max_cost_usd=1.0, consumed_cost=0.0)

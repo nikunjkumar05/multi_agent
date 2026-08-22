@@ -130,7 +130,7 @@ class CostTierOptimizer:
 
         # 3. ILP provisioning: optimize tier allocation within budget
         # Paper Component 1: Budget-Constrained LLM Provisioning
-        from core.ilp_solver import solve_ilp, get_ilp_tier_allocation
+        from core.ilp_solver import get_ilp_tier_allocation, solve_ilp
         remaining_budget = budget.max_cost_usd - budget.consumed_cost
         ilp_result = solve_ilp(remaining_budget)
         ilp_tiers = get_ilp_tier_allocation(remaining_budget)
@@ -154,8 +154,8 @@ class CostTierOptimizer:
         if rl:
             rl_topology = await rl.select_topology(task, budget.get_band().value)
 
-        from core.config import settings
         from agent.nodes.executor import detect_task_type
+        from core.config import settings
 
         llm_topology = llm_decision.topology
         

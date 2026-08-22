@@ -1,8 +1,10 @@
 import json
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
 import redis.asyncio as aioredis
+
 
 class EventBroadcaster:
     def __init__(self, redis: aioredis.Redis) -> None:
@@ -11,7 +13,7 @@ class EventBroadcaster:
     async def publish(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
         event = {
             "event_type": event_type,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": data,
         }
         event_json = json.dumps(event, default=str)

@@ -1,6 +1,8 @@
-import pytest
 from unittest.mock import MagicMock
-from core.llm import estimate_tokens, estimate_cost
+
+import pytest
+
+from core.llm import estimate_cost, estimate_tokens
 
 
 class TestEstimateTokens:

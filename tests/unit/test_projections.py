@@ -8,7 +8,6 @@ from core.projections import (
     project_ensemble_to_pipeline,
     project_ensemble_to_single,
     project_ensemble_to_supervisor,
-    project_fanout_to_pipeline,
     project_fanout_to_single,
     project_fanout_to_supervisor,
     project_pipeline_to_single,
@@ -17,7 +16,6 @@ from core.projections import (
     project_supervisor_to_single,
     validate_projected_state,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -234,7 +232,7 @@ class TestAnnotatedFieldGuard:
         ("pipeline", "single"),
     ])
     def test_projection_rejects_annotated_fields(self, from_t, to_t):
-        from core.projections import _ANNOTATED_FIELDS, _assert_no_annotated_fields
+        from core.projections import _assert_no_annotated_fields
         # Pick any annotated field and inject it into a valid projection result
         fake_result = {"topology": to_t, "completed_step_ids": [1, 2]}
         with pytest.raises(ValueError, match="leaked annotated fields"):

@@ -1,5 +1,4 @@
-import pytest
-from agent.nodes.finalizer import finalize_result, _is_subset
+from agent.nodes.finalizer import _is_subset, finalize_result
 from agent.state import AgentState
 
 

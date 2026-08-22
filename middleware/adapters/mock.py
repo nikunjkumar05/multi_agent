@@ -8,7 +8,6 @@ tests don't hit real CLIs / LLM APIs.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 from middleware.adapters.base import AgentAdapter, AgentResult, AgentTask

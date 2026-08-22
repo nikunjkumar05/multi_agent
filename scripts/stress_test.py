@@ -1,8 +1,9 @@
-import httpx
-import time
 import json
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import httpx
 
 BASE = "http://localhost:8000"
 
@@ -44,7 +45,7 @@ def test_topology_sweep():
     for topo in TOPOLOGIES:
         data = submit_and_wait(TASKS["code"], 0.50, topology=topo, timeout=120)
         logs = data.get("logs", [])
-        step_count = sum(1 for l in logs if l.startswith("Completed step"))
+        step_count = sum(1 for line in logs if line.startswith("Completed step"))
         status = data["status"]
         print(f"{topo:<12} {'fibonacci':<15} {status:<10} {step_count:<6}")
         results.append({"topology": topo, "status": status, "steps": step_count, "topology_used": data.get("topology")})
@@ -74,7 +75,7 @@ def test_task_complexity():
     for name, task in TASKS.items():
         data = submit_and_wait(task, 0.50, timeout=120)
         logs = data.get("logs", [])
-        step_count = sum(1 for l in logs if l.startswith("Completed step"))
+        step_count = sum(1 for line in logs if line.startswith("Completed step"))
         print(f"{name:<12} {data['status']:<10} {data.get('topology', '?'):<12} {step_count:<6}")
         results.append({"task": name, "status": data["status"], "topology": data.get("topology"), "steps": step_count})
     return results

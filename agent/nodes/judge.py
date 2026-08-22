@@ -155,7 +155,7 @@ async def ensemble_judge(state: AgentState) -> dict:
 
         if not judge_output or not judge_output.strip():
             judge_output = executor_outputs_str
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.warning("Judge timed out after %ds", _JUDGE_TIMEOUT)
         judge_output = executor_outputs_str
         response = None

@@ -14,13 +14,14 @@ The feedback topology implements a generate-critique-revise loop:
 The critic is the highest-weight LLM and only evaluates, never generates.
 """
 
+from langgraph.graph import END, START, StateGraph
+
 from agent.nodes.budget_gate import budget_gate_node
 from agent.nodes.entry_router import entry_router_node
 from agent.nodes.executor import execute_step
 from agent.nodes.finalizer import finalize_result
 from agent.nodes.planner import plan_task
 from agent.state import AgentState
-from langgraph.graph import END, START, StateGraph
 
 MAX_ITERATIONS = 3  # Max generate-critique-revise cycles
 
@@ -182,7 +183,7 @@ Be concise. Focus on critical issues only."""
             "logs": [f"Critic iteration {iteration + 1}: {'ACCEPT' if accepted else 'REJECT'}"],
         }
 
-    except (asyncio.TimeoutError, Exception) as e:
+    except (TimeoutError, Exception) as e:
         await emit_event(task_id, "critic_error", {"error": str(e)})
         return {
             "critic_accepted": True,  # Accept on error to avoid loop

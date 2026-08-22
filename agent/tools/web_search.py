@@ -4,6 +4,8 @@ from typing import Any
 import httpx
 
 from agent.tools.base import BaseTool, ToolResult
+
+
 class WebSearchTool(BaseTool):
     @property
     def name(self) -> str:

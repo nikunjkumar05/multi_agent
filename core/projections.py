@@ -9,7 +9,8 @@ completed_step_ids, candidate_outputs, errors, logs, topology_history)
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 # Fields annotated with Annotated[type, reducer] in AgentState.
 # The checkpointer preserves these automatically — projections must NEVER set them.
@@ -118,7 +119,7 @@ def project_fanout_to_supervisor(state: dict[str, Any]) -> dict[str, Any]:
     prior_context = None
     if completed_steps:
         summaries = [f"Step {s.get('step_id')}: {s.get('result', 'done')}" for s in completed_steps]
-        prior_context = f"Previously completed steps:\n" + "\n".join(summaries)
+        prior_context = "Previously completed steps:\n" + "\n".join(summaries)
 
     return _assert_no_annotated_fields({
         "topology": "supervisor",
@@ -147,7 +148,7 @@ def project_fanout_to_single(state: dict[str, Any]) -> dict[str, Any]:
     prior_context = None
     if completed:
         summaries = [f"Step {k}: {v}" for k, v in completed.items()]
-        prior_context = f"Partially completed work:\n" + "\n".join(summaries)
+        prior_context = "Partially completed work:\n" + "\n".join(summaries)
 
     return _assert_no_annotated_fields({
         "topology": "single",

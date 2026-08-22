@@ -1,5 +1,4 @@
-import pytest
-from agent.nodes.executor import detect_task_type, _build_executor_prompt
+from agent.nodes.executor import _build_executor_prompt, detect_task_type
 
 
 class TestDetectTaskType:

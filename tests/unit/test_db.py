@@ -1,13 +1,10 @@
 """Unit tests for core/db.py — async database abstraction."""
 
-import asyncio
-import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.db import AsyncDB, PostgresDB, SQLiteDB, get_db, close_db
-
+from core.db import PostgresDB, SQLiteDB, get_db
 
 # ── SQLite Backend ─────────────────────────────────────────────────────
 
@@ -180,7 +177,7 @@ class TestPostgresDB:
 
 class TestGetDB:
     async def test_sqlite_when_no_database_url(self):
-        with patch("core.db.get_db") as mock_get_db:
+        with patch("core.db.get_db"):
             # Reset singleton
             import core.db
             core.db._db = None

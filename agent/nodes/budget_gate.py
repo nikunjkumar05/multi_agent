@@ -16,7 +16,7 @@ from __future__ import annotations
 from enum import Enum
 
 from core.audit import get_audit_trail
-from core.budget import BudgetBand, BudgetTracker, next_topology
+from core.budget import BudgetTracker, next_topology
 from core.node_events import emit_event
 
 HARD_CAP_MULTIPLIER = 1.00  # Circuit breaker triggers at 100% of budget

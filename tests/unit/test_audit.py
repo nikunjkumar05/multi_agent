@@ -1,4 +1,3 @@
-import pytest
 from core.audit import AuditTrail, get_audit_trail
 
 

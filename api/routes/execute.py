@@ -37,7 +37,7 @@ async def _run_background(task_id: str, task: str, budget: BudgetTracker, topolo
     try:
         result = await run_task(task=task, budget=budget, task_id=task_id, topology_override=topology)
         _tasks[task_id] = TaskStatusResponse(**result)
-    except Exception as e:
+    except Exception:
         log.exception("BG task %s FAILED", task_id)
         _tasks[task_id] = TaskStatusResponse(
             task_id=task_id,

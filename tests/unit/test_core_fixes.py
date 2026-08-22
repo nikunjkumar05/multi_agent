@@ -1,11 +1,10 @@
-import pytest
-from agent.topologies.supervisor import build_supervisor_graph
+from agent.state import AgentState
+from agent.tools.registry import registry
 from agent.topologies.pipeline import _should_continue
 from agent.topologies.single import _route_after_validation
-from agent.tools.registry import registry
-from core.llm import estimate_tokens, estimate_cost
-from agent.state import AgentState
+from agent.topologies.supervisor import build_supervisor_graph
 from core.budget import BudgetTracker
+from core.llm import estimate_tokens
 
 
 def test_supervisor_topology_compiles():

@@ -1,5 +1,5 @@
-from core.budget import BudgetTracker, BudgetBand, next_topology
 from core.audit import get_audit_trail
+from core.budget import BudgetBand, BudgetTracker, next_topology
 
 
 def degrade_topology(budget: BudgetTracker, current_topology: str, task_id: str) -> str:

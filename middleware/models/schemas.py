@@ -1,5 +1,6 @@
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -18,12 +19,12 @@ class TaskCreate(BaseModel):
         "classifier always determines the authoritative type.",
     )
     prompt: str = Field(..., description="The main task instruction")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Files, language, project info")
+    context: dict[str, Any] = Field(default_factory=dict, description="Files, language, project info")
     budget_usd: float = Field(..., gt=0, description="Per-task spending ceiling in USD")
     timeout_seconds: int = Field(default=120, ge=1, description="Timeout in seconds")
-    preferred_agents: Optional[List[str]] = Field(default=None, description="e.g., ['opencode', 'aider']")
-    fallback_agents: Optional[List[str]] = Field(default=None, description="e.g., ['codex']")
-    budget_id: Optional[str] = Field(
+    preferred_agents: list[str] | None = Field(default=None, description="e.g., ['opencode', 'aider']")
+    fallback_agents: list[str] | None = Field(default=None, description="e.g., ['codex']")
+    budget_id: str | None = Field(
         default=None,
         description="Link to a persistent budget (POST /api/v1/budgets). "
         "If omitted, an ephemeral task-scoped budget is created from budget_usd.",
@@ -33,28 +34,28 @@ class TaskCreate(BaseModel):
 class TaskResponse(BaseModel):
     task_id: str
     status: TaskStatus
-    estimated_cost_usd: Optional[float] = None
-    estimated_tokens: Optional[int] = None
-    selected_agent: Optional[str] = None
-    selected_tier: Optional[str] = None
+    estimated_cost_usd: float | None = None
+    estimated_tokens: int | None = None
+    selected_agent: str | None = None
+    selected_tier: str | None = None
 
     # Populated upon completion / failure
-    output: Optional[str] = None
-    error: Optional[str] = None
-    cost_usd: Optional[float] = None
-    tokens_used: Optional[int] = None
-    latency_ms: Optional[int] = None
-    quality_score: Optional[float] = None
+    output: str | None = None
+    error: str | None = None
+    cost_usd: float | None = None
+    tokens_used: int | None = None
+    latency_ms: int | None = None
+    quality_score: float | None = None
 
     # Budget receipt — the middleware's core promise
-    budget_id: Optional[str] = None
-    budget_spent_usd: Optional[float] = None
-    budget_remaining_usd: Optional[float] = None
+    budget_id: str | None = None
+    budget_spent_usd: float | None = None
+    budget_remaining_usd: float | None = None
     budget_exceeded: bool = False
-    warning: Optional[str] = None
+    warning: str | None = None
 
     # Fallback audit trail (populated when agent retries occur)
-    attempts: Optional[List[Dict[str, Any]]] = None
+    attempts: list[dict[str, Any]] | None = None
 
 
 class BudgetCreate(BaseModel):
@@ -65,7 +66,7 @@ class BudgetCreate(BaseModel):
     max_cost_usd: float = Field(..., gt=0)
     max_tasks: int = Field(default=100, ge=1)
     warn_threshold: float = Field(default=0.80, gt=0, le=1)
-    ttl_seconds: Optional[float] = Field(default=None, description="Expiry in seconds; None = never")
+    ttl_seconds: float | None = Field(default=None, description="Expiry in seconds; None = never")
 
 
 class BudgetResponse(BaseModel):
@@ -85,11 +86,11 @@ class AgentInfoResponse(BaseModel):
     display_name: str
     version: str
     api_type: str
-    capabilities: List[str]
-    pricing: Dict[str, float]
+    capabilities: list[str]
+    pricing: dict[str, float]
     max_tokens: int
     latency_p50_ms: int
     latency_p99_ms: int
     reliability: float
-    health_endpoint: Optional[str]
+    health_endpoint: str | None
     enabled: bool

@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from typing import Any
+
+from langgraph.graph import END, START, StateGraph
 
 from agent.nodes.budget_gate import budget_gate_node
 from agent.nodes.entry_router import entry_router_node
@@ -10,7 +11,6 @@ from agent.nodes.planner import plan_task
 from agent.state import AgentState
 from core.llm import create_llm, estimate_cost, estimate_tokens
 from core.node_events import emit_event
-from langgraph.graph import END, START, StateGraph
 
 log = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ def _agent_variant(system_prompt: str, role: str, agent_key: str):
             if not content or (isinstance(content, str) and not content.strip()):
                 content = f"[Agent {role} returned empty output]"
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("Agent %s timed out after %ds", agent_key, _AGENT_TIMEOUT)
             content = f"[Agent {role} timed out after {_AGENT_TIMEOUT}s]"
             response = None

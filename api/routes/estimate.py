@@ -27,7 +27,6 @@ from pydantic import BaseModel
 from api.middleware.auth import require_auth
 from api.models.schemas import ExecuteRequest
 from core.budget import BudgetTracker
-from core.config import settings
 from core.llm import estimate_cost_from_tokens
 from core.optimizer import CostTierOptimizer
 

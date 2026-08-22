@@ -1,9 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import jwt
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket
 
 from core.config import DEFAULT_JWT_SECRET
 from core.events import EventBroadcaster
@@ -69,7 +69,7 @@ async def websocket_endpoint(
             try:
                 await ws.send_json({
                     "event_type": "ping",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "data": {},
                 })
             except Exception:

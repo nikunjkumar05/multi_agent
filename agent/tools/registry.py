@@ -44,7 +44,7 @@ registry = ToolRegistry()
 # Register default tools
 from agent.tools.code_executor import CodeExecutor
 from agent.tools.db_query import DBQueryTool
-from agent.tools.file_ops import FileReadTool, FileWriteTool, FileListTool
+from agent.tools.file_ops import FileListTool, FileReadTool, FileWriteTool
 from agent.tools.web_search import WebSearchTool
 
 registry.register(CodeExecutor())

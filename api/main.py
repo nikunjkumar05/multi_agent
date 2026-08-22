@@ -1,7 +1,7 @@
 import logging
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,7 +22,8 @@ from api.routes import audit, estimate, execute, proxy, rl, tasks
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: initialise persistent resources on startup."""
     import logging
-    from agent.topologies.builder import init_checkpointer, close_checkpointer
+
+    from agent.topologies.builder import close_checkpointer, init_checkpointer
     from core.audit import audit_trail
     from core.config import settings
     from core.db import close_db, close_psycopg_pool

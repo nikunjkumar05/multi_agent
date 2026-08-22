@@ -1,5 +1,5 @@
-import pytest
 from fastapi.testclient import TestClient
+
 from middleware.api.main import app
 
 client = TestClient(app)
@@ -229,6 +229,7 @@ def test_cancel_queued_task():
 def test_background_worker_skips_cancelled_task():
     """The worker must never overwrite a CANCELLED status (race guard)."""
     import asyncio
+
     from middleware.adapters.base import AgentTask
     from middleware.api.routes.tasks import execute_task_background, tasks_db
     from middleware.models.schemas import TaskStatus
@@ -246,6 +247,7 @@ def test_background_worker_skips_cancelled_task():
 def test_background_worker_blocks_on_exhausted_budget():
     """Worker refuses execution when the linked budget cannot afford the estimate."""
     import asyncio
+
     from middleware.adapters.base import AgentTask
     from middleware.api.routes.tasks import execute_task_background, tasks_db
     from middleware.api.state import budget_manager

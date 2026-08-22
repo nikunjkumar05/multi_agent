@@ -114,7 +114,7 @@ class OpenCodeAdapter(AgentAdapter):
                 },
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             latency_ms = int((time.monotonic() - start) * 1000)
             # Kill the process if still running
             if proc and proc.returncode is None:

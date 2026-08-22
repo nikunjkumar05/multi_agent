@@ -42,7 +42,7 @@ def node_a1(state: SharedState):
 
 def interrupt_node(state: SharedState):
     """Simulates budget gate detecting STRUCTURAL_DEGRADE."""
-    val = interrupt({"reason": "STRUCTURAL_DEGRADE", "from_topology": "graph_a"})
+    interrupt({"reason": "STRUCTURAL_DEGRADE", "from_topology": "graph_a"})
     return {}
 
 
@@ -253,7 +253,7 @@ async def test_critical_on_single():
         return {"step_results": ["single_work_done"]}
 
     def budget_gate_single(state: SharedState):
-        val = interrupt({"reason": "CRITICAL", "from_topology": "single"})
+        interrupt({"reason": "CRITICAL", "from_topology": "single"})
         return {}
 
     def single_final(state: SharedState):
@@ -301,7 +301,7 @@ async def test_interrupt_value():
     config = {"configurable": {"thread_id": thread_id}}
 
     def budget_gate_node(state: SharedState):
-        val = interrupt({"reason": "TIER_DOWNGRADE", "from_topology": "ensemble", "current_band": "HEALTHY"})
+        interrupt({"reason": "TIER_DOWNGRADE", "from_topology": "ensemble", "current_band": "HEALTHY"})
         return {}
 
     builder = StateGraph(SharedState)
@@ -389,7 +389,7 @@ async def test_step_results_accumulate():
     graph_c = builder_c.compile(checkpointer=checkpointer2)
     graph_c.update_state(config2, projected)
 
-    result = await graph_c.ainvoke(None, config2)
+    await graph_c.ainvoke(None, config2)
     final = graph_c.get_state(config2).values
     assert final["step_results"] == ["b_step1", "c_step1"], f"Expected accumulation, got {final['step_results']}"
     print(f"TEST 6: PASS - step_results accumulated: {final['step_results']}")

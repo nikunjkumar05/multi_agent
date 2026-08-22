@@ -1,6 +1,5 @@
-import pytest
-from core.escalation import should_escalate, ESCALATION_THRESHOLD_CONFIDENCE
 from core.budget import BudgetTracker
+from core.escalation import ESCALATION_THRESHOLD_CONFIDENCE, should_escalate
 
 
 class TestShouldEscalate:

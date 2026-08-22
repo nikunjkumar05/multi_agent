@@ -11,7 +11,6 @@ from langgraph.types import interrupt
 
 from core.budget import next_topology as _next_topology
 
-
 # ── Shared test state ──
 
 class OrchState(TypedDict):
@@ -218,7 +217,7 @@ class TestOrchestratorLoop:
         graph_c = builder_c.compile(checkpointer=checkpointer)
 
         graph_c.update_state(config, projected_supervisor, as_node=START)
-        result_c = await graph_c.ainvoke(None, config)
+        await graph_c.ainvoke(None, config)
 
         final = graph_c.get_state(config).values
         assert "a_work" in final["step_results"]

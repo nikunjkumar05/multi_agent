@@ -237,7 +237,7 @@ def test_background_worker_skips_cancelled_task():
     agent_task = AgentTask(task_id=task_id, prompt="x", budget_usd=1.0)
     tasks_db[task_id] = {"task_id": task_id, "status": TaskStatus.CANCELLED}
     try:
-        asyncio.run(execute_task_background(task_id, "mock", agent_task))
+        asyncio.run(execute_task_background(task_id, ["mock"], agent_task))
         assert tasks_db[task_id]["status"] == TaskStatus.CANCELLED
     finally:
         tasks_db.pop(task_id, None)
@@ -263,7 +263,7 @@ def test_background_worker_blocks_on_exhausted_budget():
         "attempts": [],
     }
     try:
-        asyncio.run(execute_task_background(task_id, "mock", agent_task))
+        asyncio.run(execute_task_background(task_id, ["mock"], agent_task))
         assert tasks_db[task_id]["status"] == TaskStatus.FAILED
         assert "Budget exhausted" in tasks_db[task_id]["error"]
     finally:

@@ -25,3 +25,7 @@ package.json
 package-lock.json
 scraped_data.csv
 server.js
+
+# Middleware SQLite persistence
+bamas_middleware.db
+*.db.bak

@@ -12,6 +12,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
+from middleware import persistence
 from middleware.api.state import budget_manager, registry
 from middleware.models.schemas import BudgetCreate, BudgetResponse
 
@@ -41,6 +42,7 @@ async def create_budget(payload: BudgetCreate):
         "Budget created via API: %s ($%.2f, %d tasks, owner=%s)",
         budget.budget_id, payload.max_cost_usd, payload.max_tasks, payload.owner,
     )
+    persistence.save_budget(budget.to_dict())
     return _to_response(budget.to_dict())
 
 
@@ -62,6 +64,7 @@ async def get_budget(budget_id: str):
 async def delete_budget(budget_id: str):
     if not budget_manager.delete_budget(budget_id):
         raise HTTPException(status_code=404, detail="Budget not found")
+    persistence.delete_budget(budget_id)
     return {"message": "Budget deleted", "budget_id": budget_id}
 
 

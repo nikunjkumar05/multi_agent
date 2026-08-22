@@ -217,6 +217,31 @@ class BudgetManager:
         )
         return budget
 
+    def restore_budget(self, data: dict) -> MiddlewareBudget:
+        """Rebuild a budget from its to_dict() representation.
+
+        Used by startup persistence loading. Silently skips unknown keys.
+        """
+        budget = MiddlewareBudget(
+            budget_id=data.get("budget_id", f"budget_{uuid.uuid4().hex[:8]}"),
+            name=data.get("name", ""),
+            owner=data.get("owner", ""),
+            max_cost_usd=float(data.get("max_cost_usd", 1.0)),
+            max_tasks=int(data.get("max_tasks", 100)),
+            max_tokens=int(data.get("max_tokens", 100_000)),
+            spent_usd=float(data.get("spent_usd", 0.0)),
+            tasks_completed=int(data.get("tasks_completed", 0)),
+            tokens_used=int(data.get("tokens_used", 0)),
+        )
+        try:
+            budget.status = BudgetStatus(data.get("status", BudgetStatus.ACTIVE.value))
+        except ValueError:
+            budget.status = BudgetStatus.ACTIVE
+        if data.get("expires_at") is not None:
+            budget.expires_at = float(data["expires_at"])
+        self._budgets[budget.budget_id] = budget
+        return budget
+
     def get_budget(self, budget_id: str) -> MiddlewareBudget | None:
         """Get a budget by ID."""
         return self._budgets.get(budget_id)

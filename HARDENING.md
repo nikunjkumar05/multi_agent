@@ -161,8 +161,96 @@ middleware/tests/conftest.py           test-mode bootstrap
 
 ## 8. Known Deferred Items (post-demo roadmap)
 
-- ILP solver → agent selection wiring (currently naive price-sort)
-- SQLite persistence (state is in-memory; restart loses tasks/budgets)
-- API-key auth (`X-API-Key`)
-- Fallback chain execution (schema field ready)
+- ~~ILP solver → agent selection wiring~~ ✅ Round 2
+- ~~SQLite persistence~~ ✅ Round 2
+- ~~API-key auth (`X-API-Key`)~~ ✅ Round 2
+- ~~Fallback chain execution~~ ✅ Round 2
 - WebSocket streaming (fake removed pending real implementation)
+
+---
+
+# ROUND 2 — Advanced Hardening (Aug 22, later session)
+
+**Result:** 145/145 tests passing (23 middleware + 122 core)
+
+---
+
+## R2-1: Budget-Constrained Agent Selection (`middleware/selection.py` — NEW)
+
+Replaced naive input-price sorting with paper Component 1 adapted to agents:
+
+```
+maximize   reliability(agent)              (quality proxy)
+subject to estimated_cost(agent) <= remaining_budget
+```
+
+- Exact optimum via exhaustive evaluation (n<20 agents) — deterministic, zero deps
+- Per-agent `estimate_cost()` uses real prompt/context (not static pricing table)
+- Output = preference ORDER feeding the fallback chain
+- Preferred agents keep absolute priority (explicit user intent wins)
+- Unaffordable agents trail so caller can 402 with the cheapest estimate
+
+## R2-2: Fallback Chain Execution
+
+Worker walks ranked candidates (primary + up to 2 fallbacks):
+
+| Guarantee | Implementation |
+|-----------|----------------|
+| "It runs" promise | Primary fails → next candidate auto-runs |
+| Full audit | `attempts[]` records every try: agent, success, cost, latency, error |
+| Budget safety | Per-attempt gate — DENY fails fast mid-chain |
+| Crash safety | Any adapter exception caught; chain continues |
+
+## R2-3: SQLite Persistence (`middleware/persistence.py` — NEW)
+
+- stdlib `sqlite3`, JSON-blob rows in `tasks` + `budgets` tables
+- Write-through at every mutation point (create/update/cancel/spend)
+- Load-on-startup restores budgets & tasks into managers
+- Interrupted tasks (queued/in_progress at restart) marked failed with reason
+- Path via `BAMAS_DB_PATH`; write failures logged, never crash the API
+
+## R2-4: API-Key Auth (`middleware/api/main.py`)
+
+- `X-API-Key` required on `/api/*` when `BAMAS_API_KEY` env is set
+- Unset → local-only trust model (allow-all + startup warning)
+- `/health` stays open for liveness probes
+- Key read per-request → testable via monkeypatch, no restart needed
+
+## R2-5: API Contract Fix
+
+- `TaskCreate.task_type`: required → **optional hint**. The classifier always
+  determines the authoritative type; requiring a field that gets overridden
+  was a misleading contract.
+
+## R2-6: Modern Lifespan + Startup Restore Banner
+
+- Replaced deprecated `@app.on_event("startup")` with `lifespan` context
+- Logs restored counts + TEST MODE warning at boot
+
+---
+
+## Files Changed (Round 2)
+
+```
+NEW  middleware/selection.py           budget-constrained ranking
+NEW  middleware/persistence.py         SQLite write-through/load
+NEW  middleware/tests/test_hardening.py  9 tests (fallback/selection/persist/auth)
+MOD  middleware/budget/budget_manager.py  restore_budget() for startup load
+MOD  middleware/api/routes/tasks.py    selection order + fallback chain + persistence
+MOD  middleware/api/routes/budgets.py  persistence hooks
+MOD  middleware/api/main.py            lifespan, auth middleware, restore-on-boot
+MOD  middleware/models/schemas.py      task_type optional hint
+MOD  middleware/tests/conftest.py      isolated temp DB per session
+MOD  .gitignore                        exclude *.db
+```
+
+## Verification
+
+```
+$ docker exec bamas-testbox python -m pytest \
+    tests/unit/{test_orchestrator,test_degrader,test_projections,
+                test_bamas_components,test_budget_gate,test_llm_helpers}.py \
+    middleware/tests/
+
+145 passed in 11.24s
+```

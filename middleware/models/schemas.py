@@ -12,7 +12,11 @@ class TaskStatus(str, Enum):
 
 
 class TaskCreate(BaseModel):
-    task_type: str = Field(..., description="e.g., code_generation, code_review")
+    task_type: str = Field(
+        default="auto",
+        description="Optional hint (e.g., code_generation). The rule-based "
+        "classifier always determines the authoritative type.",
+    )
     prompt: str = Field(..., description="The main task instruction")
     context: Dict[str, Any] = Field(default_factory=dict, description="Files, language, project info")
     budget_usd: float = Field(..., gt=0, description="Per-task spending ceiling in USD")

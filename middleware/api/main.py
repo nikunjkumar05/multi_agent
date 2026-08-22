@@ -1,12 +1,10 @@
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 from middleware import persistence
 from middleware.api.routes import budgets, tasks
@@ -18,9 +16,6 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("middleware")
-
-# Dashboard UI assets (middleware/api/static)
-_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @asynccontextmanager
@@ -110,13 +105,12 @@ app.include_router(tasks.router)
 
 @app.get("/")
 async def root():
-    return FileResponse(_STATIC_DIR / "index.html")
+    return {
+        "message": "Welcome to BAMAS Middleware API",
+        "docs_url": "/docs",
+    }
 
 
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
-
-
-# Dashboard UI (mounted LAST so /api/*, /docs, /openapi.json keep priority)
-app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")

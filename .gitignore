@@ -29,3 +29,5 @@ server.js
 # Middleware SQLite persistence
 bamas_middleware.db
 *.db.bak
+
+tests/stress_results.json

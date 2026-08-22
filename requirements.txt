@@ -1,8 +1,0 @@
-# BAMAS dependencies are managed in pyproject.toml.
-#
-# Install:
-#   pip install -e .          # production deps
-#   pip install -e ".[dev]"   # production + dev deps
-#
-# Or regenerate this file with:
-#   pip install pip-tools && pip-compile pyproject.toml -o requirements.txt
